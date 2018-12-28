@@ -1,4 +1,4 @@
-# learning how to work out at the gym: a.03.0[CartPole-v0]
+# learning how to work out at the gym: a.03.1[CartPole-v0]
 # Q-Table attempt 1
 
 # organization: (from previous)
@@ -10,6 +10,10 @@
 #           the purpose of the signal is to determine what action to take (decision policy)
 
 import gym  # CartPole-v0 dependancy
+import numpy as np
+import time
+import tensorflow as tf
+import  DQN.DQN_0 # contains DQN v0
 
 # some constants
 NUM_EPISODES = 2
@@ -44,7 +48,21 @@ def alg_policy(observation):
 #   with that being said, the difficulty is learning how to determine these Q-values
 #   TODO: How are Q values learned?
 def qtable_policy(observation):
-    # TODO: implementation
+
+    action_size = env.action_space.n
+
+    state_size = env.observation_space
+
+    qtable = np.zeros(action_size, state_size)
+    print(qtable)
+    # given state -> calculate quality of action
+
+
+# Q-Value Neural Network
+#   since the number of states is massive, determining the Q-Table (a 1:1 mapping of state to action) would be large
+#   or require substantial approximation
+#   I've decided to go ahead with making the neural network right away.
+#   Use neural network to approximate Q-
 
 
 # returns action decided by signal, 0 for random, 1 for algorithmic
@@ -64,10 +82,13 @@ def experiment(policy_signal):
 
     cumilative_reward_across_episodes = 0
 
+    # memory buffer = (index), (state, action, reward, new_state)
+    memory_buffer = ()
+
     for episode in range(NUM_EPISODES):
 
         done = False
-        total_reward = 0  # initially reward is zero in each experiment
+        episode_reward = 0  # initially reward is zero in each experiment
 
         observation = env.reset()
 
@@ -80,27 +101,54 @@ def experiment(policy_signal):
 
             observation, t_reward, done, info = env.step(action)
 
-            total_reward = total_reward + t_reward
+            episode_reward = episode_reward + t_reward
 
 
             # debugging info:
             # print('a_:', action)
             # print('o2:', observation[2])  # object, 4 values shown below
             # print('d_:', done)
-            # print('tr:', total_reward)
+            # print('tr:', episode_reward)
             # print('-------------------------------------------------------|')
 
-            if total_reward > MAX_REWARD:
+            if episode_reward > MAX_REWARD:
                 print('Max reward occured, '
                       'consider episode number {} of {} to be complete.'.format(episode + 1, n_episodes))
                 break
+            time.sleep(0.05)
 
-        print('reward: {}'.format(total_reward))
-        cumilative_reward_across_episodes += total_reward
+        print('reward: {}'.format(episode_reward))
+        cumilative_reward_across_episodes += episode_reward
+
+        time.sleep(1)
 
     print('average reward: {}'.format(cumilative_reward_across_episodes/NUM_EPISODES))
     print('-'*25)
 
+# needed a wrapper function -- this one calls the NN and such and performs DQN.
+# the origional 'experiment' really only holds algorithmic methods, where actions can be injected from
+# different choice methods. This method requires a more sophisticated interaction
+
+def stack_frames(stacked_frames, state):
+    # make a deque that
+    # TODO: THIS PART TOO
+
+def experiment_NN():
+
+    with tf.Session as sess:
+
+        cumilative_reward_across_episodes = 0
+
+        for episode in range(NUM_EPISODES):
+
+            done = False
+
+            episode_reward = 0
+
+            state = env.render() # rendering env returns initial state
+            state, stacked_frames = stack_frames(stacked_frames, state)
+
+            while done is False:
 
 
 
@@ -110,6 +158,8 @@ print('algorithmic policy:')
 experiment(ALGORITHMIC_SELECT)
 # print('algorithmic policy:')
 # [alg_policy]
+
+qtable_policy(QTABLE_SELECT)
 
 
 # saves pyglet some worry

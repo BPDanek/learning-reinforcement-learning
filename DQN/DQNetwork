@@ -1,0 +1,28 @@
+import pytorch.nn as nn
+
+
+# the number of memories used per training, this behaves as another channel to the input data
+MEMORIES_PER_TRAINING = 4 # this variable may be referred to as
+
+
+# implementation roughly taken form tutorial:
+# https://pytorch.org/tutorials/beginner/blitz/neural_networks_tutorial.html
+class DQNetwork(nn.Module):
+
+    def __init__(self):
+        super(DQNetwork, self).__init__()
+
+        # nn layers TODO: run some kind of proof of concept on these--they are not* robust
+        # input shape is (a, b, MEMORIES_PER_TRAINING)
+        # Typical: where a * b is the shape of the env image, likely image data
+        # CartPole: where a, b actually is cart position, cart velocity, pole angle pole velocity at tip
+        # (observation(width), MEMORIES_PER_TRADING(height)) = (cpos, cvel, pang, pvel, MEMORIES_PER_TRADING)
+
+        # https://pytorch.org/docs/stable/nn.html#conv2d
+        self.conv1 = nn.Conv2D(in_channels=MEMORIES_PER_TRAINING,
+                               out_channels=2,
+                               kernel_size=2)
+        self.conv2 = nn.Conv2D(in_channels=2, # the out_channels of the previous layer
+                               out_channels=1,
+                               kernel_size=1)
+        self.fcon1 = nn.Linear(1 * 2 * 1, 4)
