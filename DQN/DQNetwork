@@ -1,13 +1,18 @@
-import pytorch.nn as nn
+import torch.nn as nn
 
 
 # the number of memories used per training, this behaves as another channel to the input data
-MEMORIES_PER_TRAINING = 4 # this variable may be referred to as
+MEMORIES_PER_TRAINING = 1 # this variable may be referred to as
+
+# cart_pos, cart_velocity, pole_angle, pole_velocity, channel(number of memories) = (4, MEMORIES_PER_TRAINING)
+INPUT_DIM = (4, MEMORIES_PER_TRAINING)
 
 
 # implementation roughly taken form tutorial:
 # https://pytorch.org/tutorials/beginner/blitz/neural_networks_tutorial.html
-class DQNetwork(nn.Module):
+
+
+class Network(nn.Module):
 
     def __init__(self):
         super(DQNetwork, self).__init__()
@@ -18,11 +23,21 @@ class DQNetwork(nn.Module):
         # CartPole: where a, b actually is cart position, cart velocity, pole angle pole velocity at tip
         # (observation(width), MEMORIES_PER_TRADING(height)) = (cpos, cvel, pang, pvel, MEMORIES_PER_TRADING)
 
-        # https://pytorch.org/docs/stable/nn.html#conv2d
-        self.conv1 = nn.Conv2D(in_channels=MEMORIES_PER_TRAINING,
-                               out_channels=2,
-                               kernel_size=2)
-        self.conv2 = nn.Conv2D(in_channels=2, # the out_channels of the previous layer
-                               out_channels=1,
-                               kernel_size=1)
-        self.fcon1 = nn.Linear(1 * 2 * 1, 4)
+        # https://pytorch.org/docs/stable/nn.html#linear
+
+        # Quality of state, action pair = Q(S,A)
+        # the Q(.,.) function is what needs to be approximated with our NN
+
+        self.fully_connected1 = nn.Linear(INPUT_DIM, 4)
+        self.fully_connected2 = nn.Linear(4, 7)
+        self.fully_connected3 = nn.Linear(7, MEMORIES_PER_TRAINING) # the output: memories_per_training represent the 4 action
+                                                         # values derived from this NN approximation
+
+    def forward(self, input_data): # input_data will be a tuple with size INPUT_DIM
+        out = self.fully_connected1(input_data)
+        out = self.fully_connected2(out)
+        out = self.fully_connected3(out)
+        return out
+
+
+
