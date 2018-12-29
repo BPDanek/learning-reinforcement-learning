@@ -129,26 +129,26 @@ def experiment(policy_signal):
 # the origional 'experiment' really only holds algorithmic methods, where actions can be injected from
 # different choice methods. This method requires a more sophisticated interaction
 
-def stack_frames(stacked_frames, state):
+#def stack_frames(stacked_frames, state):
     # make a deque that
     # TODO: THIS PART TOO
 
-def experiment_NN():
-
-    with tf.Session as sess:
-
-        cumilative_reward_across_episodes = 0
-
-        for episode in range(NUM_EPISODES):
-
-            done = False
-
-            episode_reward = 0
-
-            state = env.render() # rendering env returns initial state
-            state, stacked_frames = stack_frames(stacked_frames, state)
-
-            while done is False:
+# def experiment_NN():
+#
+#     with tf.Session as sess:
+#
+#         cumilative_reward_across_episodes = 0
+#
+#         for episode in range(NUM_EPISODES):
+#
+#             done = False
+#
+#             episode_reward = 0
+#
+#             state = env.render() # rendering env returns initial state
+#             state, stacked_frames = stack_frames(stacked_frames, state)
+#
+#             #while done is False:
 
 
 
