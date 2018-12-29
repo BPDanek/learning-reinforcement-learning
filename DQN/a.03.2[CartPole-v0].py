@@ -3,7 +3,7 @@
 #
 # ALGORITHM PSEUDOCODE--------------------------------------------------------------------------------------------
 #
-# DQN Algorithm Overview:
+# DQN Algorith`m Overview:
 # initialize replay memory M
 # initialize action-value function Q with weights (a NN)
 #
