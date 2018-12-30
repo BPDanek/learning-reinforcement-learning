@@ -47,11 +47,6 @@ MEMORIES_PER_TRAINING = 3
 # number of episodes over which to perform learning of Q estimator
 EPISODES = 1
 
-# within each episode there is a set number of iterations over which learning, and space exploration occurs
-# the maximum number of iterations is a sort of catch to stop excessive looping within an episoe
-MAX_NUMBER_ITERATIONS_PER_EPISODE = 40
-
-
 NUMBER_OF_MEMORIES = 100 # number (volume) of "memories," states that are available in action replay
 
 SIZE_OF_MEMORY_CONTENTS = 4 # number of entries per memory in memory replay: (state, action, reward, new_state)
@@ -126,7 +121,9 @@ def run_training_operation(verbose=False, show_plot=False):
     for episode in range(EPISODES):
 
         # used in print statements and debugging, should be incremented within while loop
-        iteration = 0 - 1 # subtract 1 since we update iteration immediately within loop
+        iteration = 0-1 # subtract 1 since we update iteration immediately within loop
+        iterator_plus = 0 # this itorator is one ahead of the origional, needed for pyplot to resolve error:
+                          # ValueError: x and y must be the same size where y (iterator) = (2,) and x = (3,)
 
         # determines when to break out of while loop; triggered by episode limit, or by gym (2nd parameter in step return)
         done = False
@@ -146,8 +143,8 @@ def run_training_operation(verbose=False, show_plot=False):
 
         # some pyplot utility variables:
         # these two variables are intended to be plotted vs. iteration (show_plot == True)
-        current_explore_limit_BUFFER = np.ndarray()
-        explore_var_start_BUFFER = np.ndarray()
+        current_explore_limit_BUFFER = []
+        explore_var_start_BUFFER = []
 
 
         # primary algorithm iteration within episode; reset each episode
@@ -156,6 +153,7 @@ def run_training_operation(verbose=False, show_plot=False):
         #   learning done by NN instance, sample to learn comes from memory bank
         while not done:
             iteration += 1
+            iterator_plus += 1
 
             # exploration-exploitation
             epsilon = np.random.rand()
@@ -164,6 +162,7 @@ def run_training_operation(verbose=False, show_plot=False):
             current_explore_limit = 1 - (explore_var_start ** 2)
 
             # update for pyplot
+            print("index: {}".format(iteration))
             current_explore_limit_BUFFER.append(current_explore_limit)
 
             # increment before we update explore_var_start
@@ -190,17 +189,30 @@ def run_training_operation(verbose=False, show_plot=False):
                 print("\texplore_var_start: {}".format(explore_var_start))
                 print("\tcurrent_explore_limit: {:.4f}".format(current_explore_limit))
 
-            if iteration == 20:
+                print("\t\tvar: iteration range            {}".format((np.asarray(range(iteration))).shape))
+                print("\t\tvar: iteratr_plus range         {}".format((np.asarray(range(iterator_plus))).shape))
+                print("\t\tvar: explore_var_start size     {}".format((np.asarray(explore_var_start_BUFFER)).shape))
+                print("\t\tvar: current_explore_limit size {}".format((np.asarray(current_explore_limit_BUFFER)).shape))
+
+            if iteration == 45:
                 done = True
 
+
+            # plotting explore_limit_var and explore_limit as a matplotlib.pyplot versus iterations to explore the
+            # details of exploration-exploitation tradeoff
+            # this functionality occurs only after an episode is complete, really only useful during debugging
             if show_plot is True and done is True:
                 # reminder: explore limit is derived from explore variable
-                plt.plot(iteration, explore_var_start_BUFFER, label="exploration variable")
-                plt.plot(iteration, current_explore_limit_BUFFER, label="explore limit")
+                #plot_iteration = np.linspace(0, iteration[-1])
+                plt.scatter(np.asarray(range(iterator_plus)), np.asarray(explore_var_start_BUFFER),
+                            label="exploration variable")
+                plt.scatter(np.asarray(range(iterator_plus)), np.asarray(current_explore_limit_BUFFER),
+                            label="explore limit")
+
                 plt.xlabel("iteration")
                 plt.ylabel("exploration variable and limit")
                 plt.legend()
-                plt.show
+                plt.show()
 
 
 
