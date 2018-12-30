@@ -26,13 +26,18 @@
 #       ...
 
 
+# things to change:
+# explore/exploit decay rate should probably have some scientific backing
+# neural network architecture (layers, number of nodes, activations)
+# imporove means of plotting pyplot stuff
+
 # IMPORTS ---------------------------------------------------------------------------------------------------------
 
 import numpy as np
 import gym
 import torch.nn as nn
 import torch
-
+import matplotlib.pyplot as plt
 
 # HYPERPARAMETERS ------------------------------------------------------------------------------------------------
 
@@ -40,11 +45,12 @@ import torch
 MEMORIES_PER_TRAINING = 3
 
 # number of episodes over which to perform learning of Q estimator
-EPISODES = 5
+EPISODES = 1
 
-EXPLORATION_EXPLOITATION_DECAY = 0.04 # tradeoff between exploration and exploitation decay rate
-                                      # the constant that will help the RL system shift from the mindset of
-                                      # exploring to exploiting
+# within each episode there is a set number of iterations over which learning, and space exploration occurs
+# the maximum number of iterations is a sort of catch to stop excessive looping within an episoe
+MAX_NUMBER_ITERATIONS_PER_EPISODE = 40
+
 
 NUMBER_OF_MEMORIES = 100 # number (volume) of "memories," states that are available in action replay
 
@@ -98,6 +104,8 @@ class DQNetwork(nn.Module):
         return out
 
 
+# Algorithm Implementation ----------------------------------------------------------------------------------------
+
 dummy = (2, 2, 2, 2)
 
 # initialize memory replay with size N (NUMBER_OF_MEMORIES)
@@ -114,20 +122,90 @@ env = gym.make('CartPole-v0')  # CartPole simulation environment from gym
 
 # reset() generates a single observation, which is (4,) with each element a uniform value between [-0.05, 0.05]
 
+def run_training_operation(verbose=False, show_plot=False):
+    for episode in range(EPISODES):
 
-for episode in range(EPISODES):
+        # used in print statements and debugging, should be incremented within while loop
+        iteration = 0 - 1 # subtract 1 since we update iteration immediately within loop
 
-    done = False
+        # determines when to break out of while loop; triggered by episode limit, or by gym (2nd parameter in step return)
+        done = False
 
-    observation = env.reset()
-    replay_memory[memory_index] = observation
+        # some parameters:
+        # exploration-exploitation cutoffs, epsilon below explore, explore. Epsilon above explore, exploit
+        explore_var_start = 0
+        explore_min = 0.01
+        explore_decay = 0.01 # explore value will decay within the while loop at this fixed rate
+        decay_step = 0 # a component of the function that adjusts the bar
 
-    # while not done:
-    #     # select random value
+        # resetting environment returns initial observation
+        observation = env.reset()
+
+        # place initial observation into memory bank at current empty index
+        replay_memory[memory_index] = observation
+
+        # some pyplot utility variables:
+        # these two variables are intended to be plotted vs. iteration (show_plot == True)
+        current_explore_limit_BUFFER = np.ndarray()
+        explore_var_start_BUFFER = np.ndarray()
+
+
+        # primary algorithm iteration within episode; reset each episode
+        # select action, learn something
+        #   action determined by exploration-exploitation tradeoff
+        #   learning done by NN instance, sample to learn comes from memory bank
+        while not done:
+            iteration += 1
+
+            # exploration-exploitation
+            epsilon = np.random.rand()
+
+            # exploration decline is defined as such (by myself, may need to be optimized)
+            current_explore_limit = 1 - (explore_var_start ** 2)
+
+            # update for pyplot
+            current_explore_limit_BUFFER.append(current_explore_limit)
+
+            # increment before we update explore_var_start
+            decay_step += 1
+
+            # we don't want to decay below zero, always retain some small* chance of
+            # chose (3/8) because this roughly translates to "below 13%" (normal dist)
+            if not current_explore_limit < (3/8):
+                # need to update explore_start rate so that it's a little bigger each time
+                explore_var_start = explore_var_start + explore_decay*decay_step
+
+            # update for pyplot
+            explore_var_start_BUFFER.append(explore_var_start)
+
+            # verbosity flag triggers some information about the current training loop
+            if verbose is True:
+
+                if iteration == 0:  # start of while (unique print)
+                    print("\n\n----Episode {} initiated----".format(episode))
+
+                print("Iteration {}\n\nCurrent values: ".format(iteration))
+                print("\tdecay_step: {}".format(decay_step))
+                print("\tepsilon: {:.4f}".format(epsilon))
+                print("\texplore_var_start: {}".format(explore_var_start))
+                print("\tcurrent_explore_limit: {:.4f}".format(current_explore_limit))
+
+            if iteration == 20:
+                done = True
+
+            if show_plot is True and done is True:
+                # reminder: explore limit is derived from explore variable
+                plt.plot(iteration, explore_var_start_BUFFER, label="exploration variable")
+                plt.plot(iteration, current_explore_limit_BUFFER, label="explore limit")
+                plt.xlabel("iteration")
+                plt.ylabel("exploration variable and limit")
+                plt.legend()
+                plt.show
+
 
 
 
 print(net)
-
+run_training_operation(verbose=True, show_plot=True)
 
 
