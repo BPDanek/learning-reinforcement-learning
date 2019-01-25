@@ -44,7 +44,7 @@ import matplotlib.pyplot as plt
 # HYPERPARAMETERS ------------------------------------------------------------------------------------------------
 
 # the number of memories used per training step, this behaves as another channel to the input data
-MEMORIES_PER_TRAINING = 3
+MEMORIES_PER_TRAINING = 1
 
 # number of episodes over which to perform learning of Q estimator
 EPISODES = 1
@@ -74,10 +74,17 @@ INPUT_DIM_TENSOR = torch.zeros([MEMORIES_PER_TRAINING, SIZE_OF_MEMORY_CONTENTS],
 
 class DQNetwork(nn.Module):
 
+    #HYPERPARAMETERS
+
+    # TODO: run some kind of proof of concept on these--they are not* robust
+
+    # don't lose track:
+    # quality of state, action pair = Q(S,A)
+    # the Q(.,.) function is what needs to be approximated with our NN
+
     def __init__(self): # constructor
         super(DQNetwork, self).__init__() # inherits properties from parent class
 
-        # TODO: run some kind of proof of concept on these--they are not* robust
         # nn layers:
         # since there is no image data, only information based on the cart
         # position, cart velocity, pole angle, pole velocity, we will use linear (FC) layers instead of Conv. layers
@@ -85,10 +92,8 @@ class DQNetwork(nn.Module):
         #
         # https://pytorch.org/docs/stable/nn.html#linear
 
-        # done lose track:
-        # quality of state, action pair = Q(S,A)
-        # the Q(.,.) function is what needs to be approximated with our NN
 
+        # input shape
         self.fully_connected1 = nn.Linear((MEMORIES_PER_TRAINING * SIZE_OF_MEMORY_CONTENTS), 9)
         self.fully_connected2 = nn.Linear(9, 6)
         self.fully_connected3 = nn.Linear(6, MEMORIES_PER_TRAINING)
@@ -115,13 +120,11 @@ policy_net = DQNetwork()
 target_net = DQNetwork()
 
 
-
-
 # return argmax (action) given state from Neural Network
 # neural network usage derived roughly from:
 # https://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html#dqn-algorithm
 def exploit_action():
-
+    return policy_net(state)
 
 
 
@@ -138,6 +141,7 @@ def run_training_operation(verbose=False, show_plot=False):
         done = False
 
         # some parameters:
+
         # exploration-exploitation cutoffs, epsilon below explore, explore. Epsilon above explore, exploit
         explore_var_start = 0  # a value that will be iteratively updated, and used to derive our exploration limit
         explore_min = 0.01
@@ -162,7 +166,7 @@ def run_training_operation(verbose=False, show_plot=False):
         #   learning done by NN instance, sample to learn comes from memory bank
         while not done:
 
-            # update some iterators, as that's their purpose
+            # update some the iterators, as that's their purpose
             iteration += 1; iterator_plus += 1
 
             # exploration-exploitation tradeoff epsilon used to decide when to exploit and when to explore
@@ -178,9 +182,9 @@ def run_training_operation(verbose=False, show_plot=False):
             explore_decay_step += 1
 
             # calculating decay of exploration probability:
-            # we don't want to decay below zero, always retain some small* chance of
+            # we don't want to decay below zero, always retain some small* chance of explore action being taken
             # chose (3/8) because this roughly translates to "below 13%" (normal dist)
-            if not current_explore_limit < (3/8):
+            if not current_explore_limit < (3/8): # TODO: make a pyplot of the distribution of the numbers our random funciton selects so we can check it aligns with the normal dist.
                 # need to update explore_start rate so that it's a little bigger each time
                 explore_var_start = explore_var_start + explore_decay*explore_decay_step
 
@@ -193,10 +197,10 @@ def run_training_operation(verbose=False, show_plot=False):
 
 
             # select action to take
-            if current_explore_limit > epsilon_rand:
-                action = env.action_space.sample() # explore state space for new income
-            else:
-                action = exploit_action(observation) # exploit state space for best action
+            #if current_explore_limit > epsilon_rand:
+             #   action = env.action_space.sample() # explore state space for new income
+            #else:
+             #   action = exploit_action(observation) # exploit state space for best action
 
 
 
@@ -241,8 +245,25 @@ def run_training_operation(verbose=False, show_plot=False):
 
 
 
-#  print(range(env.action_space))
-#  print(net)
+# print(range(env.action_space))
+# print(net)
+policy_parameters = list(policy_net.parameters())
+target_parameters = list(target_net.parameters())
+
+print("length of policy parameters {}".format(len(policy_parameters)))
+# print(len(target_parameters)) # same as policy_params
+
+for i in range(len(policy_parameters)):
+    print("policy_param @ {}:\t{}".format(i, policy_parameters[i].size()))  # shape: number of features in layer, input size into layer
+
+input = torch.randn(4)
+print("torch.random input: {}".format(input))
+
+# TODO: make output an action to take
+output = policy_net(input)
+
+print("nn output given random input: {}".format(output))
+
 run_training_operation(verbose=True, show_plot=True)
 
 
