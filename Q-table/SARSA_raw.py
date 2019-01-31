@@ -5,9 +5,11 @@
 # f   g   h
 
 import numpy as np
+np.set_printoptions(precision=1, suppress=True)
+import random
 
-NUMBER_EPISODES = 1000     # needs update for actual training
-LR = 1                # learning rate, needs tuning
+NUMBER_EPISODES = 20000     # needs update for actual training
+LR = 0.1                # learning rate, needs tuning
 DISCOUNT = 1            # discount factor in MDP, needs tuning
 
 STARTING_STATE = 'a'
@@ -15,7 +17,7 @@ ENDING_STATE = 'h'
 
 GOAL_ACHIEVED_REWARD = 100   # reward attributed when the ENDING_STATE is achieved
 # todo: This ay not be good because it means the network will follow paths it's taken before even if they're not optimal
-BASIC_REWARD = 1            # arbitrary reward given for taking a step.
+BASIC_REWARD = -1            # arbitrary reward given for taking a step.
 
 
 
@@ -224,6 +226,20 @@ def index_to_char(state_asint):
 
 
 
+def random_starting_state(ending_state_asint):
+
+    start_state = ending_state_asint
+
+    # loop should enter because start_state initialized as ENDING_STATE, (condition for loop cont.) and break the second
+    # it is no longer the same, which is exactly what we need
+    while start_state is ending_state_asint:
+        start_state = random.randint(0, len(STATES) - 1) # randint returns start <= rand <= end (inclusive)
+
+    start_state_aschar = index_to_char(start_state)
+
+    return start_state_aschar
+
+
 
 # main:
 
@@ -252,10 +268,10 @@ cumilative_reward = 0  # todo: is this in the right place?
 
 for episode in range(NUMBER_EPISODES):
 
-    print("episode: {} \n{}".format(episode, Q_table))
-
     # initialize state in each episode as current start
-    state = STARTING_STATE
+    state = random_starting_state(char_to_index(ENDING_STATE))  # new starting position each episode
+
+    print("episode: {} --- {}\n{}".format(episode,state, Q_table))
 
     # select action_0 based on epsilon greedy
     action = select_action_greedy(episode, state, Q_table)
@@ -269,6 +285,9 @@ for episode in range(NUMBER_EPISODES):
 
         # print("time = {}".format(time_step))
         time_step += 1
+
+        if time_step == 50:
+            episode_terminate = True            # terminate episode if stuck in loop
 
 
         # take action computed at start of episode, observe outcome (reward, next state)
@@ -295,11 +314,14 @@ for episode in range(NUMBER_EPISODES):
         next_action_asint = char_to_index(next_action)
 
         # computation portion
-        Q_table[state_asint][action_asint] = Q_table[state_asint][action_asint] + (LR) * (cumilative_reward + \
-            (DISCOUNT * Q_table[next_state_asint][next_action_asint]) -  Q_table[state_asint][action_asint])
+        # Q_table[state_asint][action_asint] = Q_table[state_asint][action_asint] + (LR) * (reward + (DISCOUNT * Q_table[next_state_asint][next_action_asint]) -  Q_table[state_asint][action_asint])
+
+        Q_table[state_asint][action_asint] = (1 - LR)*(Q_table[state_asint][action_asint]) + (LR)*(reward + DISCOUNT*Q_table[next_state_asint][next_action_asint])
+
+
 
         if (episode == (NUMBER_EPISODES - 1)) or (episode % 100):
-            print("\t{} --> {}".format(state, action))
+            print(" {}-->{} ".format(state, action))
 
         # update state and action
         state = next_state
