@@ -6,6 +6,8 @@ import numpy as np
 np.set_printoptions(precision=1, suppress=True)
 import random
 import torch.nn as nn
+import torch
+import torch.nn.functional as F
 
 NUMBER_EPISODES = 20000     # needs update for actual training
 LR = 0.1                # learning rate, needs tuning
@@ -18,10 +20,29 @@ GOAL_ACHIEVED_REWARD = 100   # reward attributed when the ENDING_STATE is achiev
 # todo: This ay not be good because it means the network will follow paths it's taken before even if they're not optimal
 BASIC_REWARD = -1            # arbitrary reward given for taking a step.
 
-
-
 # available states in gridworld
 STATES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
+
+
+class deep_q_network(nn.Module):
+
+    def __init__(self):
+        super(deep_q_network, self).__init__()  # inherit properties and behaviour from neural network module pytorch
+
+        # input data is: state
+        # output data is: next_state
+        self.fc1 = nn.linear(in_features=1, out_features=2)
+        self.fc2 = nn.linear(in_features=3, out_features=4)
+        self.fc3 = nn.linear(in_features=3, out_features=2)
+        self.fc4 = nn.linear(in_features=3, out_features=1)
+
+    def forward(self, state):
+        state = self.fc1(state)
+        state = self.fc2(state)
+        state = self.fc3(state)
+        state = self.fc4(state)
+        return state
+
 
 # this structure is tied heavily to the layout of the problem. The dict allows description of the rules of the game.
 # example: definition 'a' has 'c' adjacent to it, and thus legal to transition to. 'b' has 'e', 'e' has 'b','d','h'
@@ -39,9 +60,6 @@ def house_graph():
         'h' : ['e', 'g']
     }
     return graph
-
-def make_network():
-    #todo: implement
 
 # given episode, state this function
 # computes random number
@@ -105,7 +123,9 @@ def random_action(current_state, Q_network):
 # use network to generate optimal output based on current training data
 # output needs to be returned in similar format as random_action (character)
 def optimal_action_QN(current_state, Q_network):
-    #todo: implementation
+    Q_network.zero_grad()
+    return Q_network.forward(current_state)
+
 
 # todo: assess whether this belongs in DQN
 # given a state (str), and a candidate (str) this method evaluates whether the candidate is a legal
@@ -184,26 +204,30 @@ def random_starting_state(ending_state_asint):
     return start_state_aschar
 
 
+# returns the Q value of the state, action pair, as if a Q table would
+# this is a necessary component for quantifying loss of the neural network
+def value_funct_Q(state, action, network):
+#TODO: The issue encountered here is that I need to make a structure for estimating the Q VALUE not the outcome of the Q value. I encountered
+# this same exact problem last time. wtf
+
 # main:
 
 
 # core algorithm
 
-# initialize Q_table arbitrarily* (np.zeros)
-Q_network_current = make_network(STATES)
+# initialize Q_table arbitrarily (np.zeros)
+Q_network_current = deep_q_network()
 
-# Q network loss function requires we compare the current network to a previous version
-# This is a copy that we will update as a part of the learning process
-Q_network_previous = Q_network_current
 
-cumilative_reward = 0  # todo: is this in the right place?
+# make optimizer object that will be used throughout learning
+optimizer = torch.optim.SGD(Q_network_current.parameters(), lr=LR)
 
 for episode in range(NUMBER_EPISODES):
 
     # initialize state in each episode as current start
     state = random_starting_state(char_to_index(ENDING_STATE))  # new starting position each episode
 
-    print("episode: {} --- {}\n{}".format(episode,state, Q_network))
+    print("episode: {} --- {}\n{}".format(episode,state, Q_network_current))
 
     # this flag will become true when reward for achieving goal is achieved, it's the end condition for this loop
     episode_terminate = False
@@ -228,32 +252,38 @@ for episode in range(NUMBER_EPISODES):
         # take action, observe next state and reward
         next_state, reward = step(state, action)
 
+        reward_from_current_Q = reward  # reward from current state, action pair:
+
         # update end condition (which is dependant on reward)
         # if the goal has been achieved, terminate the episode
         # this check works since achieving the goal returns a unique reward
         if reward == GOAL_ACHIEVED_REWARD:
             episode_terminate = True
 
-        # Q-Learning
-        # Q(s, a) = Q(s, a) + LR(reward + discount * exploit(state, Q_network) - Q(s, a)
 
-
-        # todo
         # compute loss
         # update weight
 
-        actual_Q = optimal_action_QN((next_state, Q_network_current)
+        # components of the loss calculation are derived from the bellman equation
+        # the bellman equation describes optimization problems in a recursive manner
+        # the best possible action is one that maximizes all future reward; Q is defined as
+        # reward + reward of next state (which entails the reward of the next next state and so on)
+        current_Q = value_funct_Q()(state, action, Q_network_current)
 
-        expected_Q = optimal_action_QN(next_state, Q_network_previous)
+        next_next_state = optimal_action_QN(next_state, Q_network_current)  # note that optimal_action returns the next good state, not an actual action
 
-        # loss function is mean square error
-        criterion = nn.MSELoss()
+        theoretical_Q = reward_from_current_Q + (DISCOUNT*value_funct_Q(next_state, next_next_state, Q_network_current))
 
-        # means square error between output and target (mse(output - target)) = (mse(q(s,a,current_network) - q(s,a, previous network)
-        loss = criterion(expected_Q, actual_Q)
 
         # weight udpate:
-        weight = weight - learning_rate * gradient
+        optimizer.zero_grad()   # prevent changes to gradient from backward pass
+
+        # loss function is mean square error
+        # means square error between output and target (mse(output - target)) = (mse(q(s,a,current_network) - q(s,a, previous network)
+        loss = nn.MSELoss(current_Q, theoretical_Q)
+        loss.backward()
+        optimizer.step()
+
 
 
         # SARSA
