@@ -206,9 +206,11 @@ def random_starting_state(ending_state_asint):
 
 # returns the Q value of the state, action pair, as if a Q table would
 # this is a necessary component for quantifying loss of the neural network
-def value_funct_Q(state, action, network):
+
+# def value_funct_Q(state, action, network):
 #TODO: The issue encountered here is that I need to make a structure for estimating the Q VALUE not the outcome of the Q value. I encountered
 # this same exact problem last time. wtf
+# I think i may have to abandon this example, and just go to the next one because it seems impossible to yield a Q value here.
 
 # main:
 

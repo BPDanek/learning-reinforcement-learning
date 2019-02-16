@@ -12,8 +12,6 @@
 import gym  # CartPole-v0 dependancy
 import numpy as np
 import time
-import tensorflow as tf
-import  DQN.DQN_0 # contains DQN v0
 
 # some constants
 NUM_EPISODES = 2
