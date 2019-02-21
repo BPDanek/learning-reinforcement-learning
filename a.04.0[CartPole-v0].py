@@ -15,7 +15,7 @@ LEARNING_RATE = 0.007
 
 # number of episodes over which to perform learning of Q estimator
 EPISODES = 50
-MAX_TIMESTEP = 70
+MAX_TIMESTEP = 100
 
 
 # NEURAL NETWORK (CLASS) -----------------------------------------------------------------------------------------
@@ -85,12 +85,19 @@ def exploit_action(observation, DQN, env):
     combined_in_L = torch.FloatTensor(np.append(observation,  np.asarray(ACTION_LEFT)))
     combined_in_R = torch.FloatTensor(np.append(observation, np.asarray(ACTION_RIGHT)))
 
+    # DQN.zero_grad()
+
     Q_value_L = DQN(combined_in_L)
     Q_value_R = DQN(combined_in_R)
 
+    print("Q_left: {}".format(Q_value_L))
+    print("Q_right: {}".format(Q_value_R))
+
     if Q_value_L > Q_value_R:
+        print("L")
         return 0
     elif Q_value_L < Q_value_R:
+        print("R")
         return 1
     else:
         print("\nQ-Values all equal, sampling action_space")
@@ -107,6 +114,7 @@ def Q_numeric_val(observation, DQN, env):
     input = torch.FloatTensor(np.append(observation, optimal_action_at_state))
 
     # pass the tensor through the network, and return the numeric value of that tensor
+    DQN.zero_grad()
     return DQN(input)
 
 # Algorithm Implementation ----------------------------------------------------------------------------------------
@@ -157,6 +165,7 @@ def run_training_operation():
             else:
                 action = env.action_space.sample()  # take random (exploratory) action
 
+
             # take step, observe reward, check for done
             # this step updates: state = state++
             next_observation, reward, done, _ = env.step(action=action)
@@ -187,6 +196,7 @@ def run_training_operation():
             print("Loss at timestep {}:     {}".format(iteration, loss))
             print("Y = reward + Q(S',A'):   {}".format(Y))
             print("Q = Q(S,A)):             {}".format(Q))
+            print("==="*35)
 
             # use optimizer with stochastic gradient descent
             optimizer = optim.SGD(DQN.parameters(), lr=LEARNING_RATE)
@@ -197,7 +207,7 @@ def run_training_operation():
 
     x = range(MAX_TIMESTEP)
     y_0 = loss_accumulator[30]
-    y_1 = loss_accumulator[45]
+    y_1 = loss_accumulator[40]
     y_2 = loss_accumulator[49]
 
     plt.plot(x, y_0)
@@ -209,7 +219,19 @@ def run_training_operation():
     plt.legend(['episode n', 'episode n+1', 'episode n+2'])
     plt.show()
 
+
+def run_testing_operation():
+    for timestep in range(MAX_TIMESTEP):
+        observation = env.reset()
+        action = exploit_action(observation, DQN, env)
+        env.render()
+        observation, _ = env.step(action)
+
+
+
 run_training_operation()
+#run_testing_operation()
+
 
 # TEST SPACE
 #
