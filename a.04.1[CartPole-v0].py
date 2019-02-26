@@ -12,11 +12,11 @@ import torch
 import matplotlib.pyplot as plt
 
 # HYPERPARAMETERS ------------------------------------------------------------------------------------------------
-LEARNING_RATE = 0.007
+LEARNING_RATE = 0.01
 
 # number of episodes over which to perform learning of Q estimator
-EPISODES = 50
-MAX_TIMESTEP = 100
+EPISODES = 10
+MAX_TIMESTEP = 50
 
 # every __ episodes compute loss, and propogate
 EXP_REPLAY_NUM = 10
@@ -94,8 +94,8 @@ def exploit_action(observation, env, DQN):
     Q_value_L = DQN(combined_in_L)
     Q_value_R = DQN(combined_in_R)
 
-    print("Q_left: {}".format(Q_value_L))
-    print("Q_right: {}".format(Q_value_R))
+    print("input L: {}                              Q_left: {}".format(combined_in_L, Q_value_L))
+    print("input R: {}                              Q_right: {}".format(combined_in_R, Q_value_R))
 
     if Q_value_L > Q_value_R:
         print("L")
@@ -138,16 +138,14 @@ loss_fn = nn.MSELoss()
 
 # declare exp. replay
 experience_replay_sa = np.zeros((EXP_REPLAY_NUM, 5)) # exp_replay_num*3(columns are Y, state, action)
-experience_replay_Y = np.zeros((EXP_REPLAY_NUM, 1))
+experience_replay_Y = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] # iteration of exp_replay_num (assuming a memory ios 10 elements
+
 
 # used for debugging, shows loss change throughout episodes
-loss_accumulator = torch.FloatTensor(np.zeros((EPISODES, MAX_TIMESTEP)))
+loss_accumulator = (np.zeros((EPISODES, (MAX_TIMESTEP))))
 
 def run_training_operation():
 
-    # forward declaration to define scope of variable used in plotting later on, and to describe timesteps within
-    # an episode
-    iteration = 0
     for episode in range(EPISODES):
 
         print("\nEpisode: ", episode)
@@ -155,7 +153,7 @@ def run_training_operation():
         time_step = 0               # time-step of current episode
         buffer_counter = 0          # counter to record buffer index for experience replay
         done = False                # flag that breaks out of episode; changed when env returns "done"
-
+        loss_accumulator_increment = 0
 
 
         observation = env.reset()   # resetting environment returns initial observation
@@ -165,6 +163,7 @@ def run_training_operation():
         # action determined by exploration-exploitation trade-off
         # learning done by NN instance, sample to learn comes from direct memory
         while not done:
+
 
             # exploration-exploitation tradeoff epsilon used to decide when to exploit and when to explore
             epsilon_rand = np.random.rand()
@@ -183,42 +182,49 @@ def run_training_operation():
             # this step updates: state = state++
             next_observation, reward, done, _ = env.step(action=action)
 
+
             # TODO: remove this once building the code is done
             # break at a time step limit
-            if iteration == MAX_TIMESTEP:
+            if time_step == MAX_TIMESTEP:
                 done = True
 
 
             # learning step
-
             # compute corresponding optimal action "next_action" to its state "next_state"
             # these values will be used to calculate target value of NN
-            next_action = exploit_action(observation, env, DQN)
+            next_action = exploit_action(next_observation, env, DQN)
 
             # target Q_val = reward + Q(S',A), will be stored in buffer
             Y = reward + Q_numeric_val(next_observation, next_action, DQN)
 
             # store state, action, Y in buffer, compute loss every few episodes
-            combined = torch.FloatTensor(np.append(observation, action))
+            state_action_concat = torch.FloatTensor(np.append(observation, action))
 
 
             # STORE INTO BUFFER actual_Q, observation, action for current timestep
             # these values to be computed in future
-            experience_replay_sa[buffer_counter] = combined
-            experience_replay_Y[buffer_counter] = Y.detach()
+            experience_replay_sa[buffer_counter] = state_action_concat
+            experience_replay_Y[buffer_counter] = Y
+
 
             # increment buffer counter before it's reset within "if" so that it can be zero'd easier
             buffer_counter += 1
 
             # loss @ every EXP_REPLAY_NUM timesteps:
-            if (iteration % EXP_REPLAY_NUM == 0):
+            if (buffer_counter % EXP_REPLAY_NUM == 0) and buffer_counter is not 0:
+
+                print("\nbuffer counter is: {}\n".format(buffer_counter))
 
                 # reset so that we can fill it again
                 buffer_counter = 0
 
-                for experience in range(EXP_REPLAY_NUM):
+
+                experience = 0
+
+                while experience < EXP_REPLAY_NUM:
 
                     # actual Q value
+                    print(experience)
                     Y = experience_replay_Y[experience]
                     state = experience_replay_sa[experience][:4]
                     action = experience_replay_sa[experience][4]
@@ -226,7 +232,12 @@ def run_training_operation():
                     # neural network estimated Q
                     Q = Q_numeric_val(state, action, DQN)
 
+                    # loss between real Q (Y) and estimated Q (Q)
                     loss = loss_fn(Y, Q)
+
+                    # need to have this funky addition mechanism because we propagate loss asynchronously, but
+                    # want to populate the loss accumulator in a synchronous order
+                    loss_accumulator[episode][experience + loss_accumulator_increment] = loss
 
                     # use optimizer with stochastic gradient descent
                     optimizer = optim.SGD(DQN.parameters(), lr=LEARNING_RATE)
@@ -243,22 +254,26 @@ def run_training_operation():
                     print(observation)
                     print(next_observation)
 
-                    print("Loss at timestep {}:     {}".format(iteration, loss))
+                    print("Loss at timestep {}:     {}".format(time_step, loss))
                     print("Y = reward + Q(S',A'):   {}".format(Y))
                     print("Q = Q(S,A)):             {}".format(Q))
                     print("===" * 35)
 
-            # a debugging update
-            loss_accumulator[episode][iteration] = loss
+                    # update experience counter
+                    experience += 1
+
+                # increment this value that allows us to add things to the loss_accumulator better
+                loss_accumulator_increment += 1
+
 
             # update time_step
             time_step += 1
 
     # print information from debugging
     x = range(MAX_TIMESTEP)
-    y_0 = loss_accumulator[30]
-    y_1 = loss_accumulator[40]
-    y_2 = loss_accumulator[49]
+    y_0 = loss_accumulator[7]
+    y_1 = loss_accumulator[8]
+    y_2 = loss_accumulator[9]
 
     plt.plot(x, y_0)
     plt.plot(x, y_1)
@@ -280,38 +295,14 @@ def run_testing_operation():
 
 
 
+# TEST SPACE
+
 run_training_operation()
+
 #run_testing_operation()
 
 
-# TEST SPACE
-#
-# action = env.action_space.sample()
-# print("action: ", action)
-#
-# net = DQNetwork()
-# print("net:", net)
-# print("zeros in observation space", np.zeros(np.shape(env.observation_space.high)))
-# observation = env.reset()
-# observation = torch.FloatTensor(observation)
-# print("observation from env as tensor: ", (observation))
-# print("observation shape", np.shape(env.observation_space.high))
-# print("observation tensor shape: ", np.shape(observation))
-#
-#
-# input = (torch.FloatTensor([0]) + torch.FloatTensor(observation))
-# print("torch.random input: {}".format(input))
-#
-# # TODO: make output an action to take
-# output = net(input)
-#
-# print("nn output given random input: {}".format(output))
-
-#run_training_operation()
-
-
 # todo: eliminate env from exploit action so that implementation is cleaner (maybe faster cuz no calls to other methods)
+# todo: make experience replay a class Instead of 2 arrays
+# todo: implement multiple episodes as input to the learning algorithm, s.t. we can capture movement of the pole
 # QUESTIONS FOR MAX:
-# how do I encode discount, and wtf is it
-
-# todo: how the fuck do i make my model better? I must be missing something critical here...
