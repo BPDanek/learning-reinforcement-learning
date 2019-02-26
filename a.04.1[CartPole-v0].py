@@ -1,24 +1,6 @@
-# learning how to work out at the gym: a.04.0[CartPole-v0]
-#   Current:
-#   Q-learning implementation, agent interacts with environment, taking epsilon greedy actions, and learning from them
-#   by taking observing outcome and augmenting neural network to fit that outcome.
-#
-#   epsilon greedy is 1/episode, where eventually epsilon becomes very low, and random number generated is likely to be
-#   above the limit, which is the criteria for exploiting neural network.
-#
-#   neural network intakes observation, and and actions, and computes corresponding Q value for state + action. This
-#   means that the if observation is (4,), and action is (1,), then input into network is (5,) and output is (1,).
-#
-#   The neural network intakes sensor data (cart position, cart velocity, pole angle, pole tip velocity) and this only
-#   uses FC layers. Architecture is: FC -> FC -> FC -> FC each with relu except for the last layer.
-#
-#   The mechanism for learning involves comparing y_i (the actual Q value) with Q_i (the estimated Q value), and
-#   computing the MSE between them, and using that as the loss to propagate throughout the network.
-#
-#   The loss is computed within each timestep, and then propagated immediately. This is not* the standard implementation
-#   of this, usually people will employ an experience replay so that loss is propagated a couple episodes at a time.
-#   This is a feature I intend on changing in the next version.
-#
+# learning how to work out at the gym: a.04.1[CartPole-v0]
+# todo: Implement experience replay into this bitch
+
 # IMPORTS ---------------------------------------------------------------------------------------------------------
 
 import numpy as np
@@ -35,6 +17,9 @@ LEARNING_RATE = 0.007
 # number of episodes over which to perform learning of Q estimator
 EPISODES = 50
 MAX_TIMESTEP = 100
+
+# every __ episodes compute loss, and propogate
+EXP_REPLAY_NUM = 10
 
 
 # NEURAL NETWORK (CLASS) -----------------------------------------------------------------------------------------
@@ -94,7 +79,7 @@ identify highest value one
 return action (in the form of env.action_space [either 0 or 1])
 
 """
-def exploit_action(observation, DQN, env):
+def exploit_action(observation, env, DQN):
     # this env-specific action set may be backwards, but these are the discrete actions within the action space of cartpole
     ACTION_LEFT = [0]
     ACTION_RIGHT = [1]
@@ -126,14 +111,17 @@ def exploit_action(observation, DQN, env):
 This method returns the numeric value of the optimal Q value given a state, network object that is trained.
 Since this method may have no optimal Q value, we need the env so that we can sample the action space randomly
 """
-def Q_numeric_val(observation, DQN, env):
-    # compute the ideal action at observation, per observation, and add the two into a tensor
-    optimal_action_at_state = exploit_action(observation, DQN, env)
+def Q_numeric_val(observation, action, DQN):
+    # since DQN intakes state and action concatenation, we can recreate the correct input to the network, assuming
+    # the state of the network is unchanged
 
-    input = torch.FloatTensor(np.append(observation, optimal_action_at_state))
+    # input is the state_action pair concatenate
+    input = torch.FloatTensor(np.append(observation,  action))
 
-    # pass the tensor through the network, and return the numeric value of that tensor
+    # zero gradient buffers, avoid autograd differentiation via current input. We don't want to overwrite buffers
+    # since we need their information (gradients) still
     DQN.zero_grad()
+
     return DQN(input)
 
 # Algorithm Implementation ----------------------------------------------------------------------------------------
@@ -145,7 +133,15 @@ env = gym.make('CartPole-v0')  # CartPole simulation environment from gym
 # make a DQN object
 DQN = DQNetwork()
 
-loss_accumulator = np.zeros((EPISODES, MAX_TIMESTEP))
+# declare MSE loss function once
+loss_fn = nn.MSELoss()
+
+# declare exp. replay
+experience_replay_sa = np.zeros((EXP_REPLAY_NUM, 5)) # exp_replay_num*3(columns are Y, state, action)
+experience_replay_Y = np.zeros((EXP_REPLAY_NUM, 1))
+
+# used for debugging, shows loss change throughout episodes
+loss_accumulator = torch.FloatTensor(np.zeros((EPISODES, MAX_TIMESTEP)))
 
 def run_training_operation():
 
@@ -156,21 +152,19 @@ def run_training_operation():
 
         print("\nEpisode: ", episode)
 
-        # used in print statements and debugging, should be incremented within while loop
-        iteration = -1               # subtract 1 since we update iteration immediately within loop
-
+        time_step = 0               # time-step of current episode
+        buffer_counter = 0          # counter to record buffer index for experience replay
         done = False                # flag that breaks out of episode; changed when env returns "done"
+
+
 
         observation = env.reset()   # resetting environment returns initial observation
 
         # primary algorithm iteration within episode; reset each episode
         # select action, learn something
-        #   action determined by exploration-exploitation trade-off
-        #   learning done by NN instance, sample to learn comes from direct memory
+        # action determined by exploration-exploitation trade-off
+        # learning done by NN instance, sample to learn comes from direct memory
         while not done:
-
-            # update some the iterators, as that's their purpose
-            iteration += 1
 
             # exploration-exploitation tradeoff epsilon used to decide when to exploit and when to explore
             epsilon_rand = np.random.rand()
@@ -180,7 +174,7 @@ def run_training_operation():
 
             # explore limit decreases with time. epsilon greater than limit, explore; else explopit
             if epsilon_rand <= current_explore_limit:
-                action = exploit_action(observation, DQN, env)
+                action = exploit_action(observation, env, DQN)
             else:
                 action = env.action_space.sample()  # take random (exploratory) action
 
@@ -197,33 +191,70 @@ def run_training_operation():
 
             # learning step
 
-            # target Q_val = reward + Q(S',A)
-            Y = reward + Q_numeric_val(next_observation, DQN, env)
+            # compute corresponding optimal action "next_action" to its state "next_state"
+            # these values will be used to calculate target value of NN
+            next_action = exploit_action(observation, env, DQN)
 
-            # real Q_val = Q(S,A)
-            Q = Q_numeric_val(observation, DQN, env)
+            # target Q_val = reward + Q(S',A), will be stored in buffer
+            Y = reward + Q_numeric_val(next_observation, next_action, DQN)
 
-            # use mse loss for computing difference between target Q and actual Q
-            loss_fn = nn.MSELoss()
-            loss = loss_fn(Y, Q)
+            # store state, action, Y in buffer, compute loss every few episodes
+            combined = torch.FloatTensor(np.append(observation, action))
 
-            loss_accumulator[episode][iteration-1] = loss
 
-            print(observation)
-            print(next_observation)
+            # STORE INTO BUFFER actual_Q, observation, action for current timestep
+            # these values to be computed in future
+            experience_replay_sa[buffer_counter] = combined
+            experience_replay_Y[buffer_counter] = Y.detach()
 
-            print("Loss at timestep {}:     {}".format(iteration, loss))
-            print("Y = reward + Q(S',A'):   {}".format(Y))
-            print("Q = Q(S,A)):             {}".format(Q))
-            print("==="*35)
+            # increment buffer counter before it's reset within "if" so that it can be zero'd easier
+            buffer_counter += 1
 
-            # use optimizer with stochastic gradient descent
-            optimizer = optim.SGD(DQN.parameters(), lr=LEARNING_RATE)
+            # loss @ every EXP_REPLAY_NUM timesteps:
+            if (iteration % EXP_REPLAY_NUM == 0):
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                # reset so that we can fill it again
+                buffer_counter = 0
 
+                for experience in range(EXP_REPLAY_NUM):
+
+                    # actual Q value
+                    Y = experience_replay_Y[experience]
+                    state = experience_replay_sa[experience][:4]
+                    action = experience_replay_sa[experience][4]
+
+                    # neural network estimated Q
+                    Q = Q_numeric_val(state, action, DQN)
+
+                    loss = loss_fn(Y, Q)
+
+                    # use optimizer with stochastic gradient descent
+                    optimizer = optim.SGD(DQN.parameters(), lr=LEARNING_RATE)
+
+                    # freeze gradients
+                    optimizer.zero_grad()
+
+                    # pytorch backward pass
+                    loss.backward()
+
+                    # take optimizer step, propagating error and shifting weights w/ stochastic gradient descent
+                    optimizer.step()
+
+                    print(observation)
+                    print(next_observation)
+
+                    print("Loss at timestep {}:     {}".format(iteration, loss))
+                    print("Y = reward + Q(S',A'):   {}".format(Y))
+                    print("Q = Q(S,A)):             {}".format(Q))
+                    print("===" * 35)
+
+            # a debugging update
+            loss_accumulator[episode][iteration] = loss
+
+            # update time_step
+            time_step += 1
+
+    # print information from debugging
     x = range(MAX_TIMESTEP)
     y_0 = loss_accumulator[30]
     y_1 = loss_accumulator[40]
@@ -236,6 +267,7 @@ def run_training_operation():
     plt.xlabel('timesteps')
     plt.ylabel('loss_accumulator object')
     plt.legend(['episode n', 'episode n+1', 'episode n+2'])
+
     plt.show()
 
 
