@@ -3,15 +3,13 @@
 #test
 
 # IMPORTS ---------------------------------------------------------------------------------------------------------
-
-from math import ceil as ceil
 import numpy as np
 import gym
 import torch.nn as nn
 from torch import optim as optim
 import torch
-
 import matplotlib.pyplot as plt
+import pandas as pd
 
 # HYPERPARAMETERS ------------------------------------------------------------------------------------------------
 LEARNING_RATE = 0.01
@@ -21,8 +19,7 @@ EPISODES = 41
 MAX_TIMESTEP = 50
 
 # every __ episodes compute loss, and propogate
-EXP_REPLAY_NUM = 10
-
+NUMBER_OF_MEMORIES = 500
 
 # NEURAL NETWORK (CLASS) -----------------------------------------------------------------------------------------
 
@@ -127,41 +124,74 @@ def Q_numeric_val(observation, action, DQN):
     return DQN(input)
 
 
-
 # Algorithm Implementation ---------------------------------------------------------------------------------------
 
-env = gym.make('CartPole-v0')  # CartPole simulation environment from gym
-# reset() generates a single observation, which is (4,) with each element a uniform value between [-0.05, 0.05]
-
-# make a DQN object
+# make a DQN object:
+# CartPole simulation environment from gym
+env = gym.make('CartPole-v0')
 DQN = DQNetwork()
+
+
+# make structure for visualizing data:
+reward_accumulator = np.ndarray((EPISODES, 1))
+loss_accumulator = np.ndarray((EPISODES, 1))
+
 
 def run_training_operation():
 
-    # declare MSE loss function once
+    # declare MSE loss function:
     loss_fn = nn.MSELoss()
 
-    # declare exp. replay
-    experience_replay_sa = np.zeros((EXP_REPLAY_NUM, 5))  # exp_replay_num*3(columns are Y, state, action)
-    experience_replay_Y = [0, 1, 2, 3, 4, 5, 6, 7, 8,
-                           9]  # iteration of exp_replay_num (assuming a memory is 10 elements)
 
-    # used for debugging, shows loss change throughout episodes
-    loss_accumulator = (np.zeros((EPISODES, MAX_TIMESTEP)))
+    # declare experience replay:
 
+    # shape of  data struct within experience replay
+    observation_shape = [[NUMBER_OF_MEMORIES], [NUMBER_OF_MEMORIES], [NUMBER_OF_MEMORIES], [NUMBER_OF_MEMORIES]]
+
+    # the following wild declaration of an array creates an array of dictionaries, which holds data from a "memory"
+    # which is the necessary data for a single iteration in the experience replay. Inspired by pandas being shit for RL
+    experience_replay = [{
+        'Y'           : -1,
+        'observation0': -1,
+        'observation1': -1,
+        'observation2': -1,
+        'observation3': -1,
+        'action'      : -1
+    } for k in range(NUMBER_OF_MEMORIES)]
+
+    # the counter used to indicate which memory we are writing when we overwrite our data/fill the memories in training
+    experience_counter = 0
+
+    # declaration and initialization of observation data structure. To be used later in program during exp. replay
+    observation_exp_rep = [0, 0, 0, 0]
+
+    # episode training loop:
     for episode in range(EPISODES):
 
+        # some formatting
         print("="*45)
         print("\nEpisode: ", episode)
 
-        time_step = 0               # time-step of current episode
-        buffer_counter = 0          # counter to record buffer index for experience replay
-        done = False  # flag that breaks out of episode; changed when env returns "done"
 
-        observation = env.reset()   # resetting environment returns initial observation
+        # declarations/initializations for episodes
+        # time-step of current episode
+        time_step = 0
 
+        # flag that breaks out of episode; changed when env returns "done"
+        done = False
+
+        # resetting environment returns initial observation
+        observation = env.reset()
+
+        # these two variables will be used to demonstrate quality of training later
+        sum_reward = 0
+        sum_loss = 0
+
+        # episode run:
         while done is not True:
 
+
+            # select action to take:
             # generate random number to be epsilon rand
             epsilon_rand = np.random.rand()
 
@@ -178,111 +208,115 @@ def run_training_operation():
                 action = env.action_space.sample()  # take random (exploratory) action
 
 
+            # interact with env:
             # take step, observe reward, check for done
             # this step updates: state = state++
-            next_observation, reward, done, _ = env.step(action=action)
+            next_observation, reward, done, info = env.step(action=action)
 
 
-            # learning step
+            # sum of rewards per episode to be stored in accumulator so we can graph it
+            sum_reward = sum_reward + reward
+
+
+            # learning step:
             # compute corresponding optimal action "next_action" to its state "next_state"
             # these values will be used to calculate target value of NN
             next_action = exploit_action(next_observation, env, DQN)
 
+            # filling exp replay:
             # target Q_val = reward + Q(S',A), will be stored in buffer
+            # note: in other RL environments we would have a Y calculation for non-terminal and terminal reward
+            #       since there is no Q_numeric if we are *done*
             Y = reward + Q_numeric_val(next_observation, next_action, DQN)
 
-            # store state, action, Y in buffer, compute loss every few episodes
-            state_action_concat = torch.FloatTensor(np.append(observation, action))
+            # fill the wild data structure with info for Y, observation, action
+            # Y = reward + Q(s', a') <-- value stored
+            # Q = Q(s, a) <-- these state & action are the ones stored
+            (experience_replay[experience_counter])['Y']            = Y
+            (experience_replay[experience_counter])['observation0'] = observation[0]
+            (experience_replay[experience_counter])['observation1'] = observation[1]
+            (experience_replay[experience_counter])['observation2'] = observation[2]
+            (experience_replay[experience_counter])['observation3'] = observation[3]
+            (experience_replay[experience_counter])['action']       = action
+
+            experience_counter += 1
 
 
-            # when you are (not on 0th iteration) and you're on a multiple of 10 time step (every 10 time steps)
-            if (buffer_counter % EXP_REPLAY_NUM == 0) and (buffer_counter >= EXP_REPLAY_NUM):
+            # learning from experience replay asynchronously:
+            # experience replay implementation. Y, state, action should be in replay. Asynchronously learn from
+            # instances of transitions. This makes for good learning-why? <--todo
+            if experience_counter is not 0:
 
-                print("\nbuffer counter is: {}\n".format(buffer_counter))
+                # recall a memory:
+                # sample micro-experience from experience memory that shows a single state transition
+                learning_index = np.random.randint(0, experience_counter)
 
-                # reset so that we can fill it again
-                buffer_counter = 0
-                loss_accumulator_increment = 0
-                experience = 0
-
-                while experience < EXP_REPLAY_NUM:
-
-                    # actual Q value
-                    print(experience)
-                    Y = experience_replay_Y[experience]
-                    state = experience_replay_sa[experience][:4]
-                    action = experience_replay_sa[experience][4]
-
-                    # neural network estimated Q
-                    Q = Q_numeric_val(state, action, DQN)
-
-                    # loss between real Q (Y) and estimated Q (Q)
-                    loss = loss_fn(Y, Q)
-
-                    # need to have this funky addition mechanism because we propagate loss asynchronously, but
-                    # want to populate the loss accumulator in a synchronous order
-                    loss_accumulator[episode][experience + loss_accumulator_increment] = loss
-
-                    # use optimizer with stochastic gradient descent
-                    optimizer = optim.SGD(DQN.parameters(), lr=LEARNING_RATE)
-
-                    # freeze gradients
-                    optimizer.zero_grad()
-
-                    # pytorch backward pass
-                    loss.backward()
-
-                    # take optimizer step, propagating error and shifting weights w/ stochastic gradient descent
-                    optimizer.step()
-
-                    print(observation)
-                    print(next_observation)
-
-                    print("Loss at timestep {}:     {}".format(time_step, loss))
-                    print("Y = reward + Q(S',A'):   {}".format(Y))
-                    print("Q = Q(S,A)):             {}".format(Q))
-                    print("===" * 35)
-
-                    # update experience counter
-                    experience += 1
-
-                # increment this value that allows us to add things to the loss_accumulator better
-                loss_accumulator_increment += 1
+                # write memory data from data structure
+                Y_exp_rep               = (experience_replay[learning_index])['Y']
+                observation_exp_rep[0]  = (experience_replay[learning_index])['observation0']
+                observation_exp_rep[1]  = (experience_replay[learning_index])['observation1']
+                observation_exp_rep[2]  = (experience_replay[learning_index])['observation2']
+                observation_exp_rep[3]  = (experience_replay[learning_index])['observation3']
+                action_exp_rep          = (experience_replay[learning_index])['action']
 
 
-            # STORE INTO BUFFER actual_Q, observation, action for current time_step
-            # these values to be computed in future
-            experience_replay_sa[buffer_counter] = state_action_concat
-            experience_replay_Y[buffer_counter] = Y
+                # compute loss:
+                # synchronously compute Q_exp_rep; note: Y is asynchronously calculated
+                Q_exp_rep = Q_numeric_val(observation_exp_rep, action_exp_rep, DQN)
+
+                # compute loss between real Q (Y) and estimated Q (Q)
+                loss = loss_fn(Y_exp_rep, Q_exp_rep)
+
+                sum_loss = sum_loss + loss
+
+                # optimize/backprop with loss:
+                # use optimizer with stochastic gradient descent
+                optimizer = optim.SGD(DQN.parameters(), lr=LEARNING_RATE)
+
+                # freeze gradients
+                optimizer.zero_grad()
+
+                # pytorch backward pass
+                loss.backward(retain_graph=True)
+
+                # take optimizer step, propagating error and shifting weights w/ stochastic gradient descent
+                optimizer.step()
+
+
+                # some telemetry
+                print(observation)
+                print(next_observation)
+
+                print("Loss at timestep {}:     {}".format(time_step, loss))
+                print("Y = reward + Q(S',A'):   {}".format(Y_exp_rep))
+                print("Q = Q(S,A)):             {}".format(Q_exp_rep))
+                print("===" * 35)
 
 
             # break at max time_steps
             if time_step == MAX_TIMESTEP:
                 done = True
 
-            # increment buffer counter which is used to store experience replay
-            buffer_counter += 1
-
             # update time_step
             time_step += 1
 
 
-    # print information from debugging
-    x = range(MAX_TIMESTEP)
-    y_0 = loss_accumulator[9]
-    y_1 = loss_accumulator[20]
-    y_2 = loss_accumulator[40]
+        # total reward  per episode
+        reward_accumulator[episode] = sum_reward
 
-    plt.plot(x, y_0)
-    plt.plot(x, y_1)
-    plt.plot(x, y_2)
+        # average loss per  episode
+        loss_accumulator[episode] = int(sum_loss/time_step)
 
-    plt.xlabel('timesteps')
-    plt.ylabel('loss_accumulator object')
-    plt.legend(['episode n', 'episode n+1', 'episode n+2'])
+    x = EPISODES
+    y1 = np.transpose(reward_accumulator)
+    y2 = np.transpose(loss_accumulator)
 
+    plt.plot(x, y1)
+    plt.plot(x, y2)
+    plt.xlabel('episodes')
+    plt.ylabel('reward/loss')
+    plt.legend(['reward', 'loss'])
     plt.show()
-
 
 def run_testing_operation():
     for timestep in range(MAX_TIMESTEP):
