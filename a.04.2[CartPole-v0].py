@@ -14,12 +14,15 @@ import pandas as pd
 # HYPERPARAMETERS ------------------------------------------------------------------------------------------------
 LEARNING_RATE = 0.01
 
+DISCOUNT = 0.99
+
 # number of episodes over which to perform learning of Q estimator
-EPISODES = 41
+EPISODES = 100
 MAX_TIMESTEP = 50
 
 # every __ episodes compute loss, and propogate
-NUMBER_OF_MEMORIES = 500
+# need to have substantial space; the upper boundary is determined by number of max timesteps and episodes
+NUMBER_OF_MEMORIES = EPISODES*MAX_TIMESTEP
 
 # NEURAL NETWORK (CLASS) -----------------------------------------------------------------------------------------
 
@@ -57,9 +60,9 @@ class DQNetwork(nn.Module):
 
     # todo: identify if these activations are reasonable
     def forward(self, input_data):
-        out = nn.functional.relu(self.fully_connected1(input_data))
-        out = nn.functional.relu(self.fully_connected2(out))
-        out = nn.functional.relu(self.fully_connected3(out))
+        out = (self.fully_connected1(input_data))
+        out = (self.fully_connected2(out))
+        out = (self.fully_connected3(out))
         out = self.fully_connected4(out)
         return out
 
@@ -121,7 +124,8 @@ def Q_numeric_val(observation, action, DQN):
     # since we need their information (gradients) still
     DQN.zero_grad()
 
-    return DQN(input)
+    temp = DQN(input)
+    return temp
 
 
 # Algorithm Implementation ---------------------------------------------------------------------------------------
@@ -133,8 +137,8 @@ DQN = DQNetwork()
 
 
 # make structure for visualizing data:
-reward_accumulator = np.ndarray((EPISODES, 1))
-loss_accumulator = np.ndarray((EPISODES, 1))
+reward_accumulator = np.ndarray((EPISODES, ))
+loss_accumulator = np.ndarray((EPISODES, ))
 
 
 def run_training_operation():
@@ -227,7 +231,7 @@ def run_training_operation():
             # target Q_val = reward + Q(S',A), will be stored in buffer
             # note: in other RL environments we would have a Y calculation for non-terminal and terminal reward
             #       since there is no Q_numeric if we are *done*
-            Y = reward + Q_numeric_val(next_observation, next_action, DQN)
+            Y = reward + (DISCOUNT * Q_numeric_val(next_observation, next_action, DQN))
 
             # fill the wild data structure with info for Y, observation, action
             # Y = reward + Q(s', a') <-- value stored
@@ -267,7 +271,7 @@ def run_training_operation():
                 # compute loss between real Q (Y) and estimated Q (Q)
                 loss = loss_fn(Y_exp_rep, Q_exp_rep)
 
-                sum_loss = sum_loss + loss
+                sum_loss = sum_loss + loss.detach().numpy()
 
                 # optimize/backprop with loss:
                 # use optimizer with stochastic gradient descent
@@ -294,7 +298,7 @@ def run_training_operation():
 
 
             # break at max time_steps
-            if time_step == MAX_TIMESTEP:
+            if time_step ==(MAX_TIMESTEP-1):
                 done = True
 
             # update time_step
@@ -305,11 +309,11 @@ def run_training_operation():
         reward_accumulator[episode] = sum_reward
 
         # average loss per  episode
-        loss_accumulator[episode] = int(sum_loss/time_step)
+        loss_accumulator[episode] = (np.nan_to_num(sum_loss)/time_step)
 
-    x = EPISODES
-    y1 = np.transpose(reward_accumulator)
-    y2 = np.transpose(loss_accumulator)
+    x = range(EPISODES)
+    y1 = (reward_accumulator)
+    y2 = (loss_accumulator)
 
     plt.plot(x, y1)
     plt.plot(x, y2)
