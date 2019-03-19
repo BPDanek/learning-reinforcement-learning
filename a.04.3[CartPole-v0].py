@@ -9,20 +9,29 @@ import torch.nn as nn
 from torch import optim as optim
 import torch
 import matplotlib.pyplot as plt
-import pandas as pd
+import queue
 
 # HYPERPARAMETERS ------------------------------------------------------------------------------------------------
-LEARNING_RATE = 0.01
+LEARNING_RATE = 0.002
 
+# note: the discount factor isn't actually used in this problem (yet)
 DISCOUNT = 0.99
 
 # number of episodes over which to perform learning of Q estimator
-EPISODES = 100
-MAX_TIMESTEP = 50
+EPISODES = 250
+MAX_TIMESTEP = 100
 
-# every __ episodes compute loss, and propogate
-# need to have substantial space; the upper boundary is determined by number of max timesteps and episodes
-NUMBER_OF_MEMORIES = EPISODES*MAX_TIMESTEP
+# we want the number of memories to remember to be relatively small, as only the most recent memories will be
+# remembered due to the Queue-like object that stores them (Buffer)
+NUM_EPISODES_TO_REMEMBER = 5
+EXPERIENCE_REPLAY_SIZE = 6
+
+# learning is performed in batches where loss is accumulated throughout batch, this accumulated loss is the
+# loss that is propagated
+BATCH_SIZE = 50
+
+# every 5 pisodes we go through learning process
+LEARNING_INTERVAL = 5
 
 # NEURAL NETWORK (CLASS) -----------------------------------------------------------------------------------------
 
@@ -113,7 +122,7 @@ def exploit_action(observation, env, DQN):
 This method returns the numeric value of the optimal Q value given a state, network object that is trained.
 Since this method may have no optimal Q value, we need the env so that we can sample the action space randomly
 """
-def Q_numeric_val(observation, action, DQN):
+def Q_numeric_val(observation, action, DQN, return_graph=False):
     # since DQN intakes state and action concatenation, we can recreate the correct input to the network, assuming
     # the state of the network is unchanged
 
@@ -125,49 +134,78 @@ def Q_numeric_val(observation, action, DQN):
     DQN.zero_grad()
 
     temp = DQN(input)
+
     return temp
+
+
+def push_and_pop(Y, obs, act, exp_replay, index):
+    # need to translate s.t. we could insert into index easily
+    memory = np.zeros(EXPERIENCE_REPLAY_SIZE)
+
+    # use Y as scalar
+    Y = Y.detach().numpy()
+
+    memory[0] = float(Y)
+    for element in range(obs.size):
+        memory[Y.size + element] = obs[element]
+    memory[Y.size + len(obs)] = float(act)
+
+
+    if (index < NUM_EPISODES_TO_REMEMBER*MAX_TIMESTEP):
+        # we have room in the memory
+        print(exp_replay[index])
+        print(memory)
+
+        exp_replay[index] = memory
+
+        index += 1
+    else:
+        # we don't have room,  need to take from stack, and put on top
+        for memory in range((NUM_EPISODES_TO_REMEMBER*MAX_TIMESTEP) - 1):
+            # shift exp_rep  down 1
+            exp_replay[memory + 1] = exp_replay[memory]
+
+            # push onto queue
+            exp_replay[0] = memory
+
+    return index, exp_replay
 
 
 # Algorithm Implementation ---------------------------------------------------------------------------------------
 
 # make a DQN object:
-# CartPole simulation environment from gym
 env = gym.make('CartPole-v0')
 DQN = DQNetwork()
 
-
 # make structure for visualizing data:
-reward_accumulator = np.ndarray((EPISODES, ))
-loss_accumulator = np.ndarray((EPISODES, ))
+reward_accumulator = np.zeros((EPISODES, ))
+loss_accumulator = np.zeros((EPISODES, ))
 
 
 def run_training_operation():
+    observation_exp_rep = [-1, -1, -1, -1]
+    action_exp_rep = -1
+    Y_exp_rep = -1
+
+    # declare optimizer
+    optimizer = optim.SGD(DQN.parameters(), lr=LEARNING_RATE)
 
     # declare MSE loss function:
     loss_fn = nn.MSELoss()
 
-
     # declare experience replay:
 
-    # shape of  data struct within experience replay
-    observation_shape = [[NUMBER_OF_MEMORIES], [NUMBER_OF_MEMORIES], [NUMBER_OF_MEMORIES], [NUMBER_OF_MEMORIES]]
+    # experience replay should store a recent set of memories
+    # the data stored should resemble Y (asynchronous), state, action (which derive Y). The idea is that
+    # the Q value will be derived from the state and action synchronously, and Y will not. Training should
+    # be done in batches, where loss is accumulated throughout the batch and then propogated.
 
-    # the following wild declaration of an array creates an array of dictionaries, which holds data from a "memory"
-    # which is the necessary data for a single iteration in the experience replay. Inspired by pandas being shit for RL
-    experience_replay = [{
-        'Y'           : -1,
-        'observation0': -1,
-        'observation1': -1,
-        'observation2': -1,
-        'observation3': -1,
-        'action'      : -1
-    } for k in range(NUMBER_OF_MEMORIES)]
+    # formal structure, the first argument represents a the number of recent memories to remember, it is computed
+    # in the "constants" section of the program.
+    # the second argument represents the information that should be stored, which was described earlier.
+    experience_replay = np.zeros(((NUM_EPISODES_TO_REMEMBER * MAX_TIMESTEP), EXPERIENCE_REPLAY_SIZE))
 
-    # the counter used to indicate which memory we are writing when we overwrite our data/fill the memories in training
-    experience_counter = 0
-
-    # declaration and initialization of observation data structure. To be used later in program during exp. replay
-    observation_exp_rep = [0, 0, 0, 0]
+    pnp_idx = 0
 
     # episode training loop:
     for episode in range(EPISODES):
@@ -187,12 +225,8 @@ def run_training_operation():
         # resetting environment returns initial observation
         observation = env.reset()
 
-        # these two variables will be used to demonstrate quality of training later
-        sum_reward = 0
-        sum_loss = 0
-
         # episode run:
-        while done is not True:
+        while (done is not True) and (time_step < MAX_TIMESTEP):
 
 
             # select action to take:
@@ -201,7 +235,14 @@ def run_training_operation():
 
             # set limit for exploration: if above limit, exploit, if below, explore
             # limit declines with time, so being above it becomes more likely
-            current_explore_limit = 1/(episode + 1)
+            # based loosely off of Nature paper of DQN in atari  games, we set a minimum explore limit of 0.1 after a
+            # certain point, here  its after  1/20th of  the episodes is  complete, in the paper its after 10 episodes
+            # which to me seemed unscalable, and  short, so i doubled the  length  and scaled it based on  episode
+            # hyperparameter.
+            if episode < (EPISODES/20):
+                current_explore_limit = 1/(episode + 1)
+            else:
+                current_explore_limit = 0.1
 
             # explore limit is declining
             # if greater than limit, exploit (more likely with time)
@@ -218,11 +259,7 @@ def run_training_operation():
             next_observation, reward, done, info = env.step(action=action)
 
 
-            # sum of rewards per episode to be stored in accumulator so we can graph it
-            sum_reward = sum_reward + reward
-
-
-            # learning step:
+            # requisites for bellman equation:
             # compute corresponding optimal action "next_action" to its state "next_state"
             # these values will be used to calculate target value of NN
             next_action = exploit_action(next_observation, env, DQN)
@@ -230,104 +267,66 @@ def run_training_operation():
             # filling exp replay:
             # target Q_val = reward + Q(S',A), will be stored in buffer
             # note: in other RL environments we would have a Y calculation for non-terminal and terminal reward
-            #       since there is no Q_numeric if we are *done*
+            #       since there is no Q_numeric if we are done
             Y = reward + (DISCOUNT * Q_numeric_val(next_observation, next_action, DQN))
 
-            # fill the wild data structure with info for Y, observation, action
+            # fill the data structure with info for Y, observation, action
             # Y = reward + Q(s', a') <-- value stored
             # Q = Q(s, a) <-- these state & action are the ones stored
-            (experience_replay[experience_counter])['Y']            = Y
-            (experience_replay[experience_counter])['observation0'] = observation[0]
-            (experience_replay[experience_counter])['observation1'] = observation[1]
-            (experience_replay[experience_counter])['observation2'] = observation[2]
-            (experience_replay[experience_counter])['observation3'] = observation[3]
-            (experience_replay[experience_counter])['action']       = action
 
-            experience_counter += 1
+            # push memory onto buffer
+            # note, pnp_idx denotes the number of memories we have in buffer. most of the time, buffer is full, and
+            # since it behaves like a queue, it will
+            pnp_idx, experience_replay = push_and_pop(Y, observation, action, experience_replay, pnp_idx)
 
+            # update observatoin
+            observation = next_observation
 
-            # learning from experience replay asynchronously:
-            # experience replay implementation. Y, state, action should be in replay. Asynchronously learn from
-            # instances of transitions. This makes for good learning-why? <--todo
-            if experience_counter is not 0:
+            # update time_step
+            time_step += 1
+            # END WHILE
 
-                # recall a memory:
-                # sample micro-experience from experience memory that shows a single state transition
-                learning_index = np.random.randint(0, experience_counter)
+        # learning step
+        # learning step performed every few episodes
+        if (episode % LEARNING_INTERVAL) is 0 and (episode != 0) :
 
-                # write memory data from data structure
-                Y_exp_rep               = (experience_replay[learning_index])['Y']
-                observation_exp_rep[0]  = (experience_replay[learning_index])['observation0']
-                observation_exp_rep[1]  = (experience_replay[learning_index])['observation1']
-                observation_exp_rep[2]  = (experience_replay[learning_index])['observation2']
-                observation_exp_rep[3]  = (experience_replay[learning_index])['observation3']
-                action_exp_rep          = (experience_replay[learning_index])['action']
+            # policy loss object will be the sum of losses within batch
+            policy_loss = []
 
+            for batch_num in range(BATCH_SIZE):
+
+                # sample random episode from memory buffer
+                learning_index = np.random.randint(0, pnp_idx)
+
+                # read memory data from data structure
+                Y_exp_rep = experience_replay[batch_num][0]
+                observation_exp_rep = experience_replay[batch_num][1:5]
+                action_exp_rep = experience_replay[batch_num][5]
 
                 # compute loss:
                 # synchronously compute Q_exp_rep; note: Y is asynchronously calculated
                 Q_exp_rep = Q_numeric_val(observation_exp_rep, action_exp_rep, DQN)
 
                 # compute loss between real Q (Y) and estimated Q (Q)
-                loss = loss_fn(Y_exp_rep, Q_exp_rep)
+                # mem_loss is the loss of the single memory
+                # batch_loss is the loss in the entire batch
+                mem_loss = loss_fn(Y_exp_rep, Q_exp_rep)
+                policy_loss.append(mem_loss)
 
-                sum_loss = sum_loss + loss.detach().numpy()
+            # optimize/backprop with cumilative loss:
+            # use optimizer with stochastic gradient descent
 
-                # optimize/backprop with loss:
-                # use optimizer with stochastic gradient descent
-                optimizer = optim.SGD(DQN.parameters(), lr=LEARNING_RATE)
+            # freeze gradients
+            optimizer.zero_grad()
 
-                # freeze gradients
-                optimizer.zero_grad()
+            # sum of loss over batch of memories
+            sum_loss = sum(policy_loss)
 
-                # pytorch backward pass
-                loss.backward(retain_graph=True)
+            # pytorch backward pass
+            sum_loss.backward()
 
-                # take optimizer step, propagating error and shifting weights w/ stochastic gradient descent
-                optimizer.step()
-
-
-                # some telemetry
-                print(observation)
-                print(next_observation)
-
-                print("Loss at timestep {}:     {}".format(time_step, loss))
-                print("Y = reward + Q(S',A'):   {}".format(Y_exp_rep))
-                print("Q = Q(S,A)):             {}".format(Q_exp_rep))
-                print("===" * 35)
-
-
-            # break at max time_steps
-            if time_step ==(MAX_TIMESTEP-1):
-                done = True
-
-            # update time_step
-            time_step += 1
-
-
-        # total reward  per episode
-        reward_accumulator[episode] = sum_reward
-
-        # average loss per  episode
-        loss_accumulator[episode] = (np.nan_to_num(sum_loss)/time_step)
-
-    x = range(EPISODES)
-    y1 = (reward_accumulator)
-    y2 = (loss_accumulator)
-
-    plt.plot(x, y1)
-    plt.plot(x, y2)
-    plt.xlabel('episodes')
-    plt.ylabel('reward/loss')
-    plt.legend(['reward', 'loss'])
-    plt.show()
-
-def run_testing_operation():
-    for timestep in range(MAX_TIMESTEP):
-        observation = env.reset()
-        action = exploit_action(observation, DQN, env)
-        env.render()
-        observation, _ = env.step(action)
+            # take optimizer step, propagating error and shifting weights w/ stochastic gradient descent
+            optimizer.step()
 
 
 
@@ -348,3 +347,9 @@ run_training_operation()
 # need to be able to learn from more than just the most recent 10 episodes, and also we should learn from previous experiences (not just recent ones()
 # learn from sevreal episodes, not just recent one
 # openai baselines
+
+# learn from batch of experiences
+    # learn from recent expereinces as well as
+
+# implement thetat and theta_hat
+    # keep theta to control network, and update  theta_hat for several iterations, then you update thetat with theta_hat
