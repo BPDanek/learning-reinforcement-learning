@@ -8,17 +8,21 @@ import gym
 import torch.nn as nn
 from torch import optim as optim
 import torch
+import time
 import matplotlib.pyplot as plt
 import queue
 
+
+SAVE_PATH = "/Users/denbanek/PycharmProjects/dqn_project_dir/learning-reinforcement-learning/dqn_weights/120_ep.pth"
+
 # HYPERPARAMETERS ------------------------------------------------------------------------------------------------
-LEARNING_RATE = 0.002
+LEARNING_RATE = 0.005
 
 # note: the discount factor isn't actually used in this problem (yet)
 DISCOUNT = 0.99
 
 # number of episodes over which to perform learning of Q estimator
-EPISODES = 250
+EPISODES = 120
 MAX_TIMESTEP = 100
 
 # we want the number of memories to remember to be relatively small, as only the most recent memories will be
@@ -100,22 +104,18 @@ def exploit_action(observation, env, DQN):
     combined_in_L = torch.FloatTensor(np.append(observation,  np.asarray(ACTION_LEFT)))
     combined_in_R = torch.FloatTensor(np.append(observation, np.asarray(ACTION_RIGHT)))
 
-    # DQN.zero_grad()
+    DQN.zero_grad()
 
     Q_value_L = DQN(combined_in_L)
     Q_value_R = DQN(combined_in_R)
 
-    print("input L: {}                              Q_left: {}".format(combined_in_L, Q_value_L))
-    print("input R: {}                              Q_right: {}".format(combined_in_R, Q_value_R))
-
     if Q_value_L > Q_value_R:
-        print("L")
         return 0
+
     elif Q_value_L < Q_value_R:
-        print("R")
         return 1
+
     else:
-        print("\nQ-Values all equal, sampling action_space")
         return env.action_space.sample()
 
 """
@@ -153,20 +153,19 @@ def push_and_pop(Y, obs, act, exp_replay, index):
 
     if (index < NUM_EPISODES_TO_REMEMBER*MAX_TIMESTEP):
         # we have room in the memory
-        print(exp_replay[index])
-        print(memory)
-
         exp_replay[index] = memory
 
         index += 1
     else:
         # we don't have room,  need to take from stack, and put on top
+        copy = exp_replay.copy()
         for memory in range((NUM_EPISODES_TO_REMEMBER*MAX_TIMESTEP) - 1):
-            # shift exp_rep  down 1
-            exp_replay[memory + 1] = exp_replay[memory]
+            if memory < (NUM_EPISODES_TO_REMEMBER*MAX_TIMESTEP):
+                # shift exp_rep  down 1
+                exp_replay[memory + 1] = copy[memory]
 
-            # push onto queue
-            exp_replay[0] = memory
+        # push onto queue
+        exp_replay[0] = memory
 
     return index, exp_replay
 
@@ -178,14 +177,12 @@ env = gym.make('CartPole-v0')
 DQN = DQNetwork()
 
 # make structure for visualizing data:
-reward_accumulator = np.zeros((EPISODES, ))
-loss_accumulator = np.zeros((EPISODES, ))
+
 
 
 def run_training_operation():
-    observation_exp_rep = [-1, -1, -1, -1]
-    action_exp_rep = -1
-    Y_exp_rep = -1
+    # means of representing learning success
+    loss_accumulator = np.ndarray((1))
 
     # declare optimizer
     optimizer = optim.SGD(DQN.parameters(), lr=LEARNING_RATE)
@@ -205,13 +202,12 @@ def run_training_operation():
     # the second argument represents the information that should be stored, which was described earlier.
     experience_replay = np.zeros(((NUM_EPISODES_TO_REMEMBER * MAX_TIMESTEP), EXPERIENCE_REPLAY_SIZE))
 
+    # index that will show what element one can insert memory to
     pnp_idx = 0
 
     # episode training loop:
     for episode in range(EPISODES):
 
-        # some formatting
-        print("="*45)
         print("\nEpisode: ", episode)
 
 
@@ -313,6 +309,8 @@ def run_training_operation():
                 mem_loss = loss_fn(Y_exp_rep, Q_exp_rep)
                 policy_loss.append(mem_loss)
 
+                np.append(loss_accumulator, mem_loss.detach().numpy())
+
             # optimize/backprop with cumilative loss:
             # use optimizer with stochastic gradient descent
 
@@ -328,13 +326,47 @@ def run_training_operation():
             # take optimizer step, propagating error and shifting weights w/ stochastic gradient descent
             optimizer.step()
 
+    # save to local directory
+    torch.save(DQN.state_dict(), SAVE_PATH)
 
+    return loss_accumulator
+
+
+def run_testing_operation():
+    num_runs = 10
+    DQN = DQNetwork()
+    DQN.load_state_dict(torch.load(SAVE_PATH))
+    average_time = 0
+
+    print("number of iterations: {}".format(EPISODES))
+    for run in range(num_runs):
+        observation = env.reset()
+        time = 0
+
+        for time_step in range(9000):
+
+            action = exploit_action(observation, env, DQN)
+            observation, reward, done, info = env.step(action)
+            #env.render(mode='human')
+
+            #time.sleep(0.3)
+
+            if done is True:
+                break
+            time += 1
+
+        #env.env.close()
+
+        average_time += time
+        print("time for run {}: {}".format(run, time))
+    print("average time: ", (average_time/num_runs))
+    print(SAVE_PATH)
 
 # TEST SPACE
 
 run_training_operation()
 
-#run_testing_operation()
+run_testing_operation()
 
 
 # todo: eliminate env from exploit action so that implementation is cleaner (maybe faster cuz no calls to other methods)
