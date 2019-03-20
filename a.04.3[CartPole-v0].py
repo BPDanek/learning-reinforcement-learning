@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import queue
 
 
-SAVE_PATH = "/Users/denbanek/PycharmProjects/dqn_project_dir/learning-reinforcement-learning/dqn_weights/120_ep.pth"
+SAVE_PATH = "/Users/denbanek/PycharmProjects/dqn_project_dir/learning-reinforcement-learning/dqn_weights/250_ep2.pth"
 
 # HYPERPARAMETERS ------------------------------------------------------------------------------------------------
 LEARNING_RATE = 0.005
@@ -22,7 +22,7 @@ LEARNING_RATE = 0.005
 DISCOUNT = 0.99
 
 # number of episodes over which to perform learning of Q estimator
-EPISODES = 120
+EPISODES = 250
 MAX_TIMESTEP = 100
 
 # we want the number of memories to remember to be relatively small, as only the most recent memories will be
@@ -205,6 +205,9 @@ def run_training_operation():
     # index that will show what element one can insert memory to
     pnp_idx = 0
 
+    # used to update explore/exploit mechanism
+    explore_counter = 0
+
     # episode training loop:
     for episode in range(EPISODES):
 
@@ -235,8 +238,13 @@ def run_training_operation():
             # certain point, here  its after  1/20th of  the episodes is  complete, in the paper its after 10 episodes
             # which to me seemed unscalable, and  short, so i doubled the  length  and scaled it based on  episode
             # hyperparameter.
-            if episode < (EPISODES/20):
-                current_explore_limit = 1/(episode + 1)
+
+            if episode < int(0.3*EPISODES):
+                current_explore_limit = 0.7
+            elif episode < int(0.6*EPISODES):
+                current_explore_limit = 0.5
+            elif episode < int(0.8*EPISODES):
+                current_explore_limit = 0.3
             else:
                 current_explore_limit = 0.1
 
