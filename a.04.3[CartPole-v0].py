@@ -6,14 +6,15 @@
 import numpy as np
 import gym
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import optim as optim
 import torch
-import time
-import matplotlib.pyplot as plt
-import queue
+from tensorboardX import SummaryWriter
 
 
-SAVE_PATH = "/Users/denbanek/PycharmProjects/dqn_project_dir/learning-reinforcement-learning/dqn_weights/250_ep2.pth"
+SAVE_PATH = "/Users/denbanek/PycharmProjects/dqn_project_dir/learning-reinforcement-learning/dqn_weights/100.pth"
+JSON_LOGDIR = "./logdirectory/learning_scalars.json"
+LOGDIR = "./logdirectory"
 
 # HYPERPARAMETERS ------------------------------------------------------------------------------------------------
 LEARNING_RATE = 0.005
@@ -22,7 +23,7 @@ LEARNING_RATE = 0.005
 DISCOUNT = 0.99
 
 # number of episodes over which to perform learning of Q estimator
-EPISODES = 250
+EPISODES = 10000
 MAX_TIMESTEP = 100
 
 # we want the number of memories to remember to be relatively small, as only the most recent memories will be
@@ -36,6 +37,9 @@ BATCH_SIZE = 50
 
 # every 5 pisodes we go through learning process
 LEARNING_INTERVAL = 5
+
+# make structure for visualizing data:
+writer = SummaryWriter(LOGDIR)
 
 # NEURAL NETWORK (CLASS) -----------------------------------------------------------------------------------------
 
@@ -65,18 +69,20 @@ class DQNetwork(nn.Module):
         #
         # https://pytorch.org/docs/stable/nn.html#linear
 
-        self.fully_connected1 = nn.Linear(in_features=5, out_features=4)
-        self.fully_connected2 = nn.Linear(in_features=4, out_features=3)
-        self.fully_connected3 = nn.Linear(in_features=3, out_features=2)
-        self.fully_connected4 = nn.Linear(in_features=2, out_features=1)
+        self.fully_connected1 = nn.Linear(in_features=5, out_features=16)
+        self.fully_connected2 = nn.Linear(in_features=16, out_features=1)
+        # self.fully_connected3 = nn.Linear(in_features=3, out_features=2)
+        # self.fully_connected4 = nn.Linear(in_features=2, out_features=1)
+
 
 
     # todo: identify if these activations are reasonable
     def forward(self, input_data):
-        out = (self.fully_connected1(input_data))
+        out = F.relu(self.fully_connected1(input_data))
         out = (self.fully_connected2(out))
-        out = (self.fully_connected3(out))
-        out = self.fully_connected4(out)
+        # out = (self.fully_connected3(out))
+        # out = self.fully_connected4(out)
+        #writer.add_histogram("fwd pass", out)
         return out
 
 
@@ -159,10 +165,9 @@ def push_and_pop(Y, obs, act, exp_replay, index):
     else:
         # we don't have room,  need to take from stack, and put on top
         copy = exp_replay.copy()
-        for memory in range((NUM_EPISODES_TO_REMEMBER*MAX_TIMESTEP) - 1):
-            if memory < (NUM_EPISODES_TO_REMEMBER*MAX_TIMESTEP):
-                # shift exp_rep  down 1
-                exp_replay[memory + 1] = copy[memory]
+        for i in range((NUM_EPISODES_TO_REMEMBER*MAX_TIMESTEP) - 1):
+            # shift exp_rep  down 1
+            exp_replay[i + 1] = copy[i]
 
         # push onto queue
         exp_replay[0] = memory
@@ -176,7 +181,9 @@ def push_and_pop(Y, obs, act, exp_replay, index):
 env = gym.make('CartPole-v0')
 DQN = DQNetwork()
 
-# make structure for visualizing data:
+
+
+
 
 
 
@@ -205,14 +212,15 @@ def run_training_operation():
     # index that will show what element one can insert memory to
     pnp_idx = 0
 
-    # used to update explore/exploit mechanism
-    explore_counter = 0
-
     # episode training loop:
     for episode in range(EPISODES):
 
         print("\nEpisode: ", episode)
 
+        Y_acc = 0
+        reward_acc = 0
+        loss_acc = 0
+        Q_acc = 0
 
         # declarations/initializations for episodes
         # time-step of current episode
@@ -240,7 +248,7 @@ def run_training_operation():
             # hyperparameter.
 
             if episode < int(0.3*EPISODES):
-                current_explore_limit = 0.7
+                current_explore_limit = 0.99
             elif episode < int(0.6*EPISODES):
                 current_explore_limit = 0.5
             elif episode < int(0.8*EPISODES):
@@ -261,7 +269,7 @@ def run_training_operation():
             # take step, observe reward, check for done
             # this step updates: state = state++
             next_observation, reward, done, info = env.step(action=action)
-
+            reward_acc += reward
 
             # requisites for bellman equation:
             # compute corresponding optimal action "next_action" to its state "next_state"
@@ -273,6 +281,7 @@ def run_training_operation():
             # note: in other RL environments we would have a Y calculation for non-terminal and terminal reward
             #       since there is no Q_numeric if we are done
             Y = reward + (DISCOUNT * Q_numeric_val(next_observation, next_action, DQN))
+            Y_acc += Y
 
             # fill the data structure with info for Y, observation, action
             # Y = reward + Q(s', a') <-- value stored
@@ -310,6 +319,7 @@ def run_training_operation():
                 # compute loss:
                 # synchronously compute Q_exp_rep; note: Y is asynchronously calculated
                 Q_exp_rep = Q_numeric_val(observation_exp_rep, action_exp_rep, DQN)
+                Q_acc += Q_exp_rep
 
                 # compute loss between real Q (Y) and estimated Q (Q)
                 # mem_loss is the loss of the single memory
@@ -327,13 +337,24 @@ def run_training_operation():
 
             # sum of loss over batch of memories
             sum_loss = sum(policy_loss)
+            loss_acc += sum_loss
 
             # pytorch backward pass
             sum_loss.backward()
 
+            testing_result = run_testing_operation()
+
+
+            writer.add_scalar("testing within loss funct", testing_result, global_step=episode)
+
             # take optimizer step, propagating error and shifting weights w/ stochastic gradient descent
             optimizer.step()
+        writer.add_scalar("Y_acc_train", Y_acc, global_step=episode)
+        writer.add_scalar("reward_acc_train", reward_acc, global_step=episode)
+        writer.add_scalar("loss_acc_train", loss_acc, global_step=episode)
 
+
+    writer.export_scalars_to_json(JSON_LOGDIR)
     # save to local directory
     torch.save(DQN.state_dict(), SAVE_PATH)
 
@@ -342,33 +363,35 @@ def run_training_operation():
 
 def run_testing_operation():
     num_runs = 10
-    DQN = DQNetwork()
-    DQN.load_state_dict(torch.load(SAVE_PATH))
+    # DQN = DQNetwork()
+    # DQN.load_state_dict(torch.load(SAVE_PATH))
     average_time = 0
+
 
     print("number of iterations: {}".format(EPISODES))
     for run in range(num_runs):
         observation = env.reset()
         time = 0
+        reward_acc_test = 0
 
         for time_step in range(9000):
 
+            #action = env.action_space.sample()
             action = exploit_action(observation, env, DQN)
             observation, reward, done, info = env.step(action)
-            #env.render(mode='human')
 
-            #time.sleep(0.3)
+            reward_acc_test += reward
 
             if done is True:
                 break
             time += 1
-
-        #env.env.close()
+        writer.add_scalar("reward_acc_test", reward_acc_test, global_step=run)
 
         average_time += time
         print("time for run {}: {}".format(run, time))
-    print("average time: ", (average_time/num_runs))
-    print(SAVE_PATH)
+    avg = average_time/num_runs
+    print("average time: ", (avg))
+    return avg
 
 # TEST SPACE
 
@@ -376,20 +399,9 @@ run_training_operation()
 
 run_testing_operation()
 
-
 # todo: eliminate env from exploit action so that implementation is cleaner (maybe faster cuz no calls to other methods)
 # todo: make experience replay a class Instead of 2 arrays
 # todo: implement multiple episodes as input to the learning algorithm, s.t. we can capture movement of the pole
 # QUESTIONS FOR MAX:
 
-# 10 memories isnt long enough
-# make it so that we can go under 10 timesteps and learn still (right now it should only learn from greater than 10 timesteps, which may never learn)
-# need to be able to learn from more than just the most recent 10 episodes, and also we should learn from previous experiences (not just recent ones()
-# learn from sevreal episodes, not just recent one
-# openai baselines
-
-# learn from batch of experiences
-    # learn from recent expereinces as well as
-
-# implement thetat and theta_hat
-    # keep theta to control network, and update  theta_hat for several iterations, then you update thetat with theta_hat
+writer.close()
