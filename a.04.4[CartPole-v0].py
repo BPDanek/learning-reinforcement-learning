@@ -1,45 +1,61 @@
-# learning how to work out at the gym: a.04.4[CartPole-v0]
+# things to test:
+# replay buffer size
 
-# IMPORTS ---------------------------------------------------------------------------------------------------------
-import numpy as np
+
 import gym
+import numpy as np
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim as optim
-import torch
 from tensorboardX import SummaryWriter
 
 
+# PATHS --------------------------------------------------------------------------------------------------------------
+# global path to save DQN parameters after training:
 SAVE_PATH = "/Users/denbanek/PycharmProjects/dqn_project_dir/learning-reinforcement-learning/dqn_weights/100.pth"
+
+# local path for JSON logger (currently not used effectively)
 JSON_LOGDIR = "./logdirectory/learning_scalars.json"
+
+# local path for tensorboardX logging
 LOGDIR = "./logdirectory"
 
-# HYPERPARAMETERS ------------------------------------------------------------------------------------------------
+# HYPERPARAMETERS ----------------------------------------------------------------------------------------------------
+
+# learning rate for stochastic gradient descent
 LEARNING_RATE = 0.005
 
-# note: the discount factor isn't actually used in this problem (yet)
+# Markov chain discount factor
+# note: the discount factor isn't actually used in this problem
 DISCOUNT = 0.99
 
-# number of episodes over which to perform learning of Q estimator
-EPISODES = 10000
-MAX_TIMESTEP = 100
+# number of episodes over which agent will learn from environment
+EPISODES = 20
 
-# we want the number of memories to remember to be relatively small, as only the most recent memories will be
-# remembered due to the Queue-like object that stores them (Buffer)
-NUM_EPISODES_TO_REMEMBER = 5
+# maximum number of timesteps  within an episode before the episode is forcefully ended
+MAX_TIMESTEP = 1000
+
+# the size of a single log within the experience replay. The format is [Y, obs1, obs2, obs3, obs4, action], which
+# represents recording the target Q (Y), state (obs1-obs4), action (action)
 EXPERIENCE_REPLAY_SIZE = 6
 
-# learning is performed in batches where loss is accumulated throughout batch, this accumulated loss is the
-# loss that is propagated
-BATCH_SIZE = 50
+# size of experience replay is dictated by the number of episodes we want to be able to learn from.
+# since the Q learning step is asynchronous in this version (4.4), we need to make an experience replay,
+# a structure which holds recent transitions to learn from. This variable distinguishes the size of the
+# experience replay.
+NUM_EPISODES_TO_REMEMBER = 5
+
+# learning happens asynchronously by extracting n nonconsecutive samples from the experience replay
+BUFFER_SIZE = 50
 
 # every 5 pisodes we go through learning process
 LEARNING_INTERVAL = 5
 
-# make structure for visualizing data:
+# tensorboardX uses this object to write data to a tensorboard
 writer = SummaryWriter(LOGDIR)
 
-# NEURAL NETWORK (CLASS) -----------------------------------------------------------------------------------------
+# NEURAL NETWORK 9---------------------------------------------------------------------------------------------
 
 """
 Neural network estimates Q-value
@@ -63,7 +79,7 @@ class DQNetwork(nn.Module):
         # nn layers:
         # since there is no image data, only information based on the cart
         # position, cart velocity, pole angle, pole velocity, we will use linear (FC) layers instead of Conv. layers
-        # the (todo: )architecture needs refinement for sure
+        # todo: structure of NN still in testing
         #
         # https://pytorch.org/docs/stable/nn.html#linear
 
@@ -72,15 +88,16 @@ class DQNetwork(nn.Module):
         # self.fully_connected3 = nn.Linear(in_features=3, out_features=2)
         # self.fully_connected4 = nn.Linear(in_features=2, out_features=1)
 
-
-
-    # todo: identify if these activations are reasonable
+    # pytorch requires a forward pass implementation that determines how the network layers are used
+    # todo: the structure and activations of NN are in still testing
     def forward(self, input_data):
         out = F.relu(self.fully_connected1(input_data))
         out = (self.fully_connected2(out))
         # out = (self.fully_connected3(out))
         # out = self.fully_connected4(out)
-        #writer.add_histogram("fwd pass", out)
+
+        # to provide visibility into the network weight convergence
+        # writer.add_histogram("fwd pass weights", out)
         return out
 
 
@@ -99,41 +116,46 @@ return action (in the form of env.action_space [either 0 or 1])
 
 """
 def exploit_action(observation, env, DQN):
-    # this env-specific action set may be backwards, but these are the discrete actions within the action space of cartpole
+    # this env-specific action (set may be backwards) which are the discrete actions of cartpole
     ACTION_LEFT = [0]
     ACTION_RIGHT = [1]
 
-    # since we're passing parameters into the nn made in the torch framework we cast them to the torch tensor dtype
     # inputs to neural network
-    combined_in_L = torch.FloatTensor(np.append(observation,  np.asarray(ACTION_LEFT)))
-    combined_in_R = torch.FloatTensor(np.append(observation, np.asarray(ACTION_RIGHT)))
+    # since we're passing parameters into the nn made in the torch framework we cast them to the torch tensor dtype
+    combined_in_L = torch.Tensor(np.append(observation,  np.asarray(ACTION_LEFT)))
+    combined_in_R = torch.Tensor(np.append(observation, np.asarray(ACTION_RIGHT)))
 
+
+    # todo: test if this does anything; do we need to have a "requiregrad = false" in the tensor?
+    # freeze gradients of network so that they aren't augmented by the forward pass
     DQN.zero_grad()
 
+    # pass (state, action), receive Q_value (computed twice for each action in the action space)
+    # this segment represents an assessment along the lines of a fork in the road, you look at which direction
+    # should bring you better results, and you take it.
     Q_value_L = DQN(combined_in_L)
     Q_value_R = DQN(combined_in_R)
 
+    # compare Q_value and select the highest value one
+    # sample if they're the same
     if Q_value_L > Q_value_R:
         return 0
-
     elif Q_value_L < Q_value_R:
         return 1
-
     else:
         return env.action_space.sample()
 
 """
-This method returns the numeric value of the optimal Q value given a state, network object that is trained.
-Since this method may have no optimal Q value, we need the env so that we can sample the action space randomly
+This method returns the numeric Q value of the state, action pair.
+It appends the action to the end of the observation, and it passes the combination into the network to return
+the function estimate of the network directly. Returns tensor.
 """
-def Q_numeric_val(observation, action, DQN, return_graph=False):
-    # since DQN intakes state and action concatenation, we can recreate the correct input to the network, assuming
-    # the state of the network is unchanged
+def Q_numeric_val(observation, action, DQN):
 
     # input is the state_action pair concatenate
     input = torch.FloatTensor(np.append(observation,  action))
 
-    # zero gradient buffers, avoid autograd differentiation via current input. We don't want to overwrite buffers
+    # zero gradient buffers, avoid autograd differentiation due to current input. We don't want to overwrite buffers
     # since we need their information (gradients) still
     DQN.zero_grad()
 
@@ -141,137 +163,144 @@ def Q_numeric_val(observation, action, DQN, return_graph=False):
 
     return temp
 
+"""
+Write data from interacting with environment to the data structure that stores the transition from s to s', and it's
+accompanying target Q value. This method (at one point) was a queue (first in first out) which would hold only a recent
+set of memories, but has since been changed in an attempt to debug. It currently has an amount of allocated space
+which will be filled with memories during the interaction step of the algorithm, and then sampled to learn from
+during the learning step (this allocated space is the experience replay). 
 
+This method inserts the memory into the index, and increments the index to show the position of the most recent memory.
+"""
 def push_and_pop(Y, obs, act, exp_replay, index):
-    # need to translate s.t. we could insert into index easily
+    # make shape of memory
     memory = np.zeros(EXPERIENCE_REPLAY_SIZE)
 
-    # use Y as scalar
+    # save Y as scalar
     Y = Y.detach().numpy()
 
+    # insert values into memory
     memory[0] = float(Y)
     for element in range(obs.size):
         memory[Y.size + element] = obs[element]
     memory[Y.size + len(obs)] = float(act)
 
-    # fill replay with memories; when  itll be full we'll flush it
+    # insert memory into replay @ index
     exp_replay[index] = memory
 
+    # index increment so that it shows the next available spot in the replay
     index += 1
 
     return index, exp_replay
 
 
-# Algorithm Implementation ---------------------------------------------------------------------------------------
+# Algorithm Implementation/main ---------------------------------------------------------------------------------------
 
-# make a DQN object:
+
+# global variables:
 env = gym.make('CartPole-v0')
 DQN = DQNetwork()
 
+"""
+The core deep Q learning algorithm implementation with experience replay (utilizes helper functions)
+"""
 
 def run_training_operation():
-    # means of representing learning success
-    loss_accumulator = np.ndarray((1))
 
-    # declare optimizer
+    # declare optimizer: stochastic gradient descent with learning rate from global hyperparameter
     optimizer = optim.SGD(DQN.parameters(), lr=LEARNING_RATE)
 
-    # declare MSE loss function:
+    # declare MSE loss function
     loss_fn = nn.MSELoss()
 
-    # declare experience replay:
-
+    # declare experience replay
     # experience replay should store a recent set of memories
-    # the data stored should resemble Y (asynchronous), state, action (which derive Y). The idea is that
-    # the Q value will be derived from the state and action synchronously, and Y will not. Training should
-    # be done in batches, where loss is accumulated throughout the batch and then propogated.
-
-    # formal structure, the first argument represents a the number of recent memories to remember, it is computed
+    # the data stored should resemble Y (asynchronous target Q), state, action (which derive Y). The idea is that
+    # the Q value will be derived from the state and action synchronously, and Y will just be extracted as a scalar.
+    # the loss will be calculated between the Q and Y over several samples from the memory. A batch of losses (sum)
+    # will be used for the weight update.
+    #
+    # the first argument represents a the number of recent memories to remember, it is computed
     # in the "constants" section of the program.
-    # the second argument represents the information that should be stored, which was described earlier.
+    # the second argument represents the information that should be stored, Y (target Q), observation, action
     experience_replay = np.zeros(((NUM_EPISODES_TO_REMEMBER * MAX_TIMESTEP), EXPERIENCE_REPLAY_SIZE))
 
-    # index that will show what element one can insert memory to
+    # index that holds the index the next free
     pnp_idx = 0
 
-    # episode training loop:
+    # training loop for episodes
     for episode in range(EPISODES):
 
-        print("\nEpisode: ", episode)
+        # the algorithm needs to be "zero'd" before each episode so that results from previous episodes don't interfere
+        # with results of current episodes
+        print("Episode: ", episode)
 
-        Y_acc = 0
-        reward_acc = 0
-        loss_acc = 0
-        Q_acc = 0
-
-        # declarations/initializations for episodes
-        # time-step of current episode
+        # time-step of current episode; incremented once in each repetition in the while loop
         time_step = 0
 
-        # flag that breaks out of episode; changed when env returns "done"
+        # initialization & declaration of flag that breaks out of episode; changed when env returns "done"
         done = False
 
         # resetting environment returns initial observation
         observation = env.reset()
 
-        # episode run:
+        # episode loops while the done flag isn't switched to "True" by the environment (terminal condition satisfied)
+        # we also set a hard cap for the number of time steps we run
         while (done is not True) and (time_step < MAX_TIMESTEP):
 
+            # epsilon greedy mechanism for selecting actions:
 
-            # select action to take:
-            # generate random number to be epsilon rand
+            # generate random number to be epsilon
             epsilon_rand = np.random.rand()
 
-            # set limit for exploration: if above limit, exploit, if below, explore
-            # limit declines with time, so being above it becomes more likely
-            # based loosely off of Nature paper of DQN in atari  games, we set a minimum explore limit of 0.1 after a
-            # certain point, here  its after  1/20th of  the episodes is  complete, in the paper its after 10 episodes
-            # which to me seemed unscalable, and  short, so i doubled the  length  and scaled it based on  episode
-            # hyperparameter.
-
+            # set exploration limit, a piecewise function that writes the limit based on what % of episodes we've run
+            # while in 30% of episodes we set a limit of 0.99
             if episode < int(0.3*EPISODES):
                 current_explore_limit = 0.99
+            # while in 60% of episodes we set a limit of 0.5
             elif episode < int(0.6*EPISODES):
                 current_explore_limit = 0.5
+            # while in 80% of episodes we set a limit of 0.3
             elif episode < int(0.8*EPISODES):
                 current_explore_limit = 0.3
+            # the minimum explore limit is 0.1
             else:
                 current_explore_limit = 0.1
 
-            # explore limit is declining
-            # if greater than limit, exploit (more likely with time)
-            # if less than limit, explore (less likely with time)
+            # keeping in mind the explore limit shrinks with time:
+            # if epsilon is greater than the limit, we exploit our DQN, and select the best action
+            # otherwise, most often in the beginning of the set of episodes, we sample the action space to explore
+            # the state space of the simulation.
             if epsilon_rand >= current_explore_limit:
                 action = exploit_action(observation, env, DQN)
             else:
                 action = env.action_space.sample()  # take random (exploratory) action
 
+            # interact with environment by taking an action at the current state (in DQN)
+            # after interaction observe the consecutive state, reward from the transition, updated done flag
+            next_observation, reward, done, _ = env.step(action=action)
 
-            # interact with env:
-            # take step, observe reward, check for done
-            # this step updates: state = state++
-            next_observation, reward, done, info = env.step(action=action)
-            reward_acc += reward
 
-            # requisites for bellman equation:
-            # compute corresponding optimal action "next_action" to its state "next_state"
-            # these values will be used to calculate target value of NN
+            # requirements for bellman equation to be stored in experience replay
+            # fill the experience replay with info for Y, observation, action
+            # Y = reward + Q(s', a') <-- value stored
+            # Q = Q(s, a) <-- state and action  are  stored
+
+            # compute optimal action' based on state'; to be used in calculating target Q
             next_action = exploit_action(next_observation, env, DQN)
 
-            # filling exp replay:
-            # target Q_val = reward + Q(S',A), will be stored in buffer
-            # note: in other RL environments we would have a Y calculation for non-terminal and terminal reward
-            #       since there is no Q_numeric if we are done
+            # target Q value (Y) is the reward from (s,a) + Q(s',a')
+            # the goal of the learning process is to produce a function that can approximate the target Q value
             Y = reward + (DISCOUNT * Q_numeric_val(next_observation, next_action, DQN))
-            Y_acc += Y
 
-            # fill the data structure with info for Y, observation, action
-            # Y = reward + Q(s', a') <-- value stored
-            # Q = Q(s, a) <-- these state & action are the ones stored
-
-            # push memory onto buffer
-            # note, pnp_idx denotes the number of memories we have in buffer. most of the time, buffer is full, and
-            # since it behaves like a queue, it will
+            # store memory onto buffer
+            # note:
+            # pnp_idx denotes the next memory to be written. In the first episode, this value points to the
+            # highest index value of a written memory, where values below index are memories, and values above are
+            # zeros/whatever value was used to initialize the experience replay.
+            # during non-first episodes, the value points to memory that can be overwritten; the experience
+            # replay, however, is not cleared after the exp replay is exhausted, pnp_idx is, however, reset, so
+            # new memories will overwrite the buffer values from the previous version of the experience replay
             pnp_idx, experience_replay = push_and_pop(Y, observation, action, experience_replay, pnp_idx)
 
             # update observatoin
@@ -279,71 +308,72 @@ def run_training_operation():
 
             # update time_step
             time_step += 1
-            # END WHILE
 
-        # learning step
-        # learning step performed every few episodes, ideally whne memory is full
+            # end of time step, go back to while loop
+
+        # learning step:
+        # occurs every few episodes
+        """
+        learning step:
+        perform the following n times:
+                sample a memory from the experience replay
+                compute mse loss for the sampled memory
+                append mse loss to object
+            sum mse losses
+            back propagate mse loss with optimizer
+            
+        """
         if (episode % NUM_EPISODES_TO_REMEMBER) is 0 and (episode != 0):
 
-            # policy loss object will be the sum of losses within batch
+            # policy loss will have the losses computed throughout the batches appended to it, it acts as a log
+            # for the MSE loss computed between Q and Y (target Q)
             policy_loss = []
 
+            # todo: check the number of times we sample?
+            # the learning step happens several times, in this version the number of samples is dictated by the number
+            # of recent memories available from the last bit of learning
             for batch_num in range(pnp_idx):
 
-                # sample random episode from memory buffer
+                # sample random episode within
                 learning_index = np.random.randint(0, pnp_idx)
 
-                # read memory data from data structure
-                Y_exp_rep = experience_replay[batch_num][0]
-                observation_exp_rep = experience_replay[batch_num][1:5]
-                action_exp_rep = experience_replay[batch_num][5]
+                # read memory data from data structure based on sampled index
+                Y_exp_rep = experience_replay[learning_index][0]
+                observation_exp_rep = experience_replay[learning_index][1:5]
+                action_exp_rep = experience_replay[learning_index][5]
 
-                # compute loss:
-                # synchronously compute Q_exp_rep; note: Y is asynchronously calculated
+                # compute Q value estimate from neural network
                 Q_exp_rep = Q_numeric_val(observation_exp_rep, action_exp_rep, DQN)
-                Q_acc += Q_exp_rep
 
-                # compute loss between real Q (Y) and estimated Q (Q)
-                # mem_loss is the loss of the single memory
-                # batch_loss is the loss in the entire batch
+                # compute loss between target Q (Y) and estimated Q (Q)
+                # mem_loss is the loss within a single memory, or transition
                 mem_loss = loss_fn(Y_exp_rep, Q_exp_rep)
+
+                # policy loss holds mem_losses from the memory loss computation step
                 policy_loss.append(mem_loss)
 
-                np.append(loss_accumulator, mem_loss.detach().numpy())
-
-            # optimize/backprop with cumilative loss:
-            # use optimizer with stochastic gradient descent
+            # back propagate with cumulative mse loss:
 
             # freeze gradients
             optimizer.zero_grad()
 
             # sum of loss over batch of memories
             sum_loss = sum(policy_loss)
-            loss_acc += sum_loss
 
-            # pytorch backward pass
+            # pytorch backward pass over sum of losses
             sum_loss.backward()
 
-            testing_result = run_testing_operation()
-
-            # flush experience replay:"
+            # zero pnp_index, this operation represents the notion of clearing experience memory
+            # allows us to write from the start of the queue again at the interaction with env stage
             pnp_idx = 0
-
-
-            writer.add_scalar("testing within loss funct", testing_result, global_step=episode)
 
             # take optimizer step, propagating error and shifting weights w/ stochastic gradient descent
             optimizer.step()
-        writer.add_scalar("Y_acc_train", Y_acc, global_step=episode)
-        writer.add_scalar("reward_acc_train", reward_acc, global_step=episode)
-        writer.add_scalar("loss_acc_train", loss_acc, global_step=episode)
 
 
     writer.export_scalars_to_json(JSON_LOGDIR)
     # save to local directory
     torch.save(DQN.state_dict(), SAVE_PATH)
-
-    return loss_accumulator
 
 
 def run_testing_operation():
