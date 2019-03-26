@@ -82,16 +82,21 @@ class DQNetwork(nn.Module):
         #
         # https://pytorch.org/docs/stable/nn.html#linear
 
-        self.fully_connected1 = nn.Linear(in_features=4, out_features=16)
-        self.fully_connected2 = nn.Linear(in_features=16, out_features=2)
+        self.fully_connected1 = nn.Linear(in_features=4, out_features=128)
+        self.fully_connected2 = nn.Linear(in_features=128, out_features=256)
+        self.fully_connected3 = nn.Linear(in_features=265, out_features=512)
+        self.fully_connected4 = nn.Linear(in_features=512, out_features=2)
         # self.fully_connected3 = nn.Linear(in_features=3, out_features=2)
         # self.fully_connected4 = nn.Linear(in_features=2, out_features=1)
 
     # pytorch requires a forward pass implementation that determines how the network layers are used
     # todo: the structure and activations of NN are in still testing
     def forward(self, input_data):
-        out = F.relu(self.fully_connected1(input_data))
-        out = (self.fully_connected2(out))
+        print(input_data.shape)
+        out = F.relu((self.fully_connected1(input_data)))
+        out = F.relu(self.fully_connected2(out))
+        out = F.relu(self.fully_connected3(out))
+        out = (self.fully_connected4(out))
         # out = (self.fully_connected3(out))
         # out = self.fully_connected4(out)
 
@@ -108,12 +113,12 @@ It requires that we: pass in the state, and return the confidence values for the
 def exploit_action(observation, env, DQN):
 
     # todo: test if this does anything; do we need to have a "requiregrad = false" in the tensor?
-    # freeze gradients of network so that they aren't augmented by the forward pass
-    DQN.zero_grad()
+    # set network to evaluation mode
+    DQN.eval()
 
-    input = torch.as_tensor(observation, dtype=torch.float)
+    temp = torch.as_tensor(observation, dtype=torch.float)
 
-    Q_values = DQN(input)
+    Q_values = DQN(temp)
 
     # compare Q_value and select the highest value one
     # sample if they're the same
@@ -133,7 +138,7 @@ def Q_numeric_val(observation, action, DQN):
 
     # zero gradient buffers, avoid autograd differentiation due to current input. We don't want to overwrite buffers
     # since we need their information (gradients) still
-    DQN.zero_grad()
+    DQN.train()
 
     temp = torch.as_tensor(observation, dtype=torch.float)
 
