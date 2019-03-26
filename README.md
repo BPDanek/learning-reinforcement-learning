@@ -1,4 +1,4 @@
-NOTE: Most recent work is the cartpole file in top directory. Previous versions are there, the SARSA implementation is functional as well, and can successfully beat simple maps. 
+NOTE: Most ecent work is the cartpole file in top directory. Previous versions are there, the SARSA implementation is functional as well, and can successfully beat simple maps. 
 
 below requires update, but may still be relevant.
 If you're a newbie interested in Reinforcement Learning (like me) this project may be worth looking at! 
