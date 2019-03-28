@@ -12,7 +12,7 @@ from tensorboardX import SummaryWriter
 
 # PATHS --------------------------------------------------------------------------------------------------------------
 # global path to save DQN parameters after training:
-SAVE_PATH = "/Users/denbanek/PycharmProjects/dqn_project_dir/learning-reinforcement-learning/dqn_weights/100.pth"
+SAVE_PATH = "/Users/denbanek/PycharmProjects/dqn_project_dir/learning-reinforcement-learning/dqn_weights/test.pth"
 
 # local path for JSON logger (currently not used effectively)
 JSON_LOGDIR = "./logdirectory/learning_scalars.json"
@@ -23,14 +23,14 @@ LOGDIR = "./logdirectory"
 # HYPERPARAMETERS ----------------------------------------------------------------------------------------------------
 
 # learning rate for stochastic gradient descent
-LEARNING_RATE = 0.003
+LEARNING_RATE = 0.55
 
 # Markov chain discount factor
 # note: the discount factor isn't actually used in this problem
 DISCOUNT = 0.99
 
 # number of episodes over which agent will learn from environment
-EPISODES =50000
+EPISODES =300
 
 # maximum number of timesteps  within an episode before the episode is forcefully ended
 MAX_TIMESTEP = 1000000000
@@ -43,13 +43,13 @@ EXPERIENCE_REPLAY_SIZE = 6
 # since the Q learning step is asynchronous in this version (4.4), we need to make an experience replay,
 # a structure which holds recent transitions to learn from. This variable distinguishes the size of the
 # experience replay.
-NUM_EPISODES_TO_REMEMBER = 5
+NUM_EPISODES_TO_REMEMBER = 1
 
 # learning happens asynchronously by extracting n nonconsecutive samples from the experience replay
 BUFFER_SIZE = 50
 
 # every 5 pisodes we go through learning process
-LEARNING_INTERVAL = 5
+LEARNING_INTERVAL = 1
 
 # tensorboardX uses this object to write data to a tensorboard
 writer = SummaryWriter(LOGDIR)
@@ -100,7 +100,9 @@ class DQNetwork(nn.Module):
         # out = self.fully_connected4(out)
 
         # to provide visibility into the network weight convergence
-        # writer.add_histogram("fwd pass weights", out)
+#        writer.add_histogram("fwd pass weights", out)
+        writer.add_scalar("out(0)", out[0])
+        writer.add_scalar("out(1)", out[1])
         return out
 
 
@@ -185,6 +187,7 @@ def push_and_pop(Y, obs, act, exp_replay, index):
 # global variables:
 env = gym.make('CartPole-v0')
 DQN = DQNetwork()
+#DQN.load_state_dict(torch.load(SAVE_PATH))
 
 """
 The core deep Q learning algorithm implementation with experience replay (utilizes helper functions)
@@ -218,7 +221,7 @@ def run_training_operation():
 
         # the algorithm needs to be "zero'd" before each episode so that results from previous episodes don't interfere
         # with results of current episodes
-        if (episode % 500) == 0:
+        if (episode % 100) == 0:
             print("Episode: ", episode)
 
         # time-step of current episode; incremented once in each repetition in the while loop
@@ -266,28 +269,29 @@ def run_training_operation():
             # after interaction observe the consecutive state, reward from the transition, updated done flag
             next_observation, reward, done, _ = env.step(action=action)
 
+            # when done is false, we don't need to learn, the episode terminated and there is no learning to be done (for cartpole)
+            if done is False:
+                # requirements for bellman equation to be stored in experience replay
+                # fill the experience replay with info for Y, observation, action
+                # Y = reward + Q(s', a') <-- value stored
+                # Q = Q(s, a) <-- state and action  are  stored
 
-            # requirements for bellman equation to be stored in experience replay
-            # fill the experience replay with info for Y, observation, action
-            # Y = reward + Q(s', a') <-- value stored
-            # Q = Q(s, a) <-- state and action  are  stored
+                # compute optimal action' based on state'; to be used in calculating target Q
+                next_action = exploit_action(next_observation, env, DQN)
 
-            # compute optimal action' based on state'; to be used in calculating target Q
-            next_action = exploit_action(next_observation, env, DQN)
+                # target Q value (Y) is the reward from (s,a) + Q(s',a')
+                # the goal of the learning process is to produce a function that can approximate the target Q value
+                Y = reward + (DISCOUNT * Q_numeric_val(next_observation, next_action, DQN))
 
-            # target Q value (Y) is the reward from (s,a) + Q(s',a')
-            # the goal of the learning process is to produce a function that can approximate the target Q value
-            Y = reward + (DISCOUNT * Q_numeric_val(next_observation, next_action, DQN))
-
-            # store memory onto buffer
-            # note:
-            # pnp_idx denotes the next memory to be written. In the first episode, this value points to the
-            # highest index value of a written memory, where values below index are memories, and values above are
-            # zeros/whatever value was used to initialize the experience replay.
-            # during non-first episodes, the value points to memory that can be overwritten; the experience
-            # replay, however, is not cleared after the exp replay is exhausted, pnp_idx is, however, reset, so
-            # new memories will overwrite the buffer values from the previous version of the experience replay
-            pnp_idx, experience_replay = push_and_pop(Y, observation, action, experience_replay, pnp_idx)
+                # store memory onto buffer
+                # note:
+                # pnp_idx denotes the next memory to be written. In the first episode, this value points to the
+                # highest index value of a written memory, where values below index are memories, and values above are
+                # zeros/whatever value was used to initialize the experience replay.
+                # during non-first episodes, the value points to memory that can be overwritten; the experience
+                # replay, however, is not cleared after the exp replay is exhausted, pnp_idx is, however, reset, so
+                # new memories will overwrite the buffer values from the previous version of the experience replay
+                pnp_idx, experience_replay = push_and_pop(Y, observation, action, experience_replay, pnp_idx)
 
             # update observatoin
             observation = next_observation
@@ -363,9 +367,9 @@ def run_training_operation():
 
 
 def run_testing_operation():
-    num_runs = 500
+    num_runs = 100
     # DQN = DQNetwork()
-    # DQN.load_state_dict(torch.load(SAVE_PATH))
+    DQN.load_state_dict(torch.load(SAVE_PATH))
     average_time = 0
 
 
