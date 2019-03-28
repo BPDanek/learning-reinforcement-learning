@@ -23,17 +23,17 @@ LOGDIR = "./logdirectory"
 # HYPERPARAMETERS ----------------------------------------------------------------------------------------------------
 
 # learning rate for stochastic gradient descent
-LEARNING_RATE = 0.005
+LEARNING_RATE = 0.003
 
 # Markov chain discount factor
 # note: the discount factor isn't actually used in this problem
 DISCOUNT = 0.99
 
 # number of episodes over which agent will learn from environment
-EPISODES =100000
+EPISODES =50000
 
 # maximum number of timesteps  within an episode before the episode is forcefully ended
-MAX_TIMESTEP = 1000
+MAX_TIMESTEP = 1000000000
 
 # the size of a single log within the experience replay. The format is [Y, obs1, obs2, obs3, obs4, action], which
 # represents recording the target Q (Y), state (obs1-obs4), action (action)
@@ -82,21 +82,20 @@ class DQNetwork(nn.Module):
         #
         # https://pytorch.org/docs/stable/nn.html#linear
 
-        self.fully_connected1 = nn.Linear(in_features=4, out_features=128)
-        self.fully_connected2 = nn.Linear(in_features=128, out_features=256)
-        self.fully_connected3 = nn.Linear(in_features=265, out_features=512)
-        self.fully_connected4 = nn.Linear(in_features=512, out_features=2)
+        self.fully_connected1 = nn.Linear(in_features=4, out_features=64)
+        self.fully_connected2 = nn.Linear(in_features=64, out_features=128)
+        self.fully_connected3 = nn.Linear(in_features=128, out_features=64)
+        self.fully_connected4 = nn.Linear(in_features=64, out_features=2)
         # self.fully_connected3 = nn.Linear(in_features=3, out_features=2)
         # self.fully_connected4 = nn.Linear(in_features=2, out_features=1)
 
     # pytorch requires a forward pass implementation that determines how the network layers are used
     # todo: the structure and activations of NN are in still testing
     def forward(self, input_data):
-        print(input_data.shape)
-        out = F.relu((self.fully_connected1(input_data)))
+        out = F.relu(self.fully_connected1(input_data))
         out = F.relu(self.fully_connected2(out))
         out = F.relu(self.fully_connected3(out))
-        out = (self.fully_connected4(out))
+        out = self.fully_connected4(out)
         # out = (self.fully_connected3(out))
         # out = self.fully_connected4(out)
 
@@ -141,12 +140,13 @@ def Q_numeric_val(observation, action, DQN):
     DQN.train()
 
     temp = torch.as_tensor(observation, dtype=torch.float)
+    action = DQN(temp)
 
     # return axis that denotes desired Q value
-    if action == 0:
-        return temp[0]
+    if action[0] > action[1]:
+        return action[0]
     else:
-        return temp[1]
+        return action[1]
 
 """
 Write data from interacting with environment to the data structure that stores the transition from s to s', and it's
@@ -218,7 +218,8 @@ def run_training_operation():
 
         # the algorithm needs to be "zero'd" before each episode so that results from previous episodes don't interfere
         # with results of current episodes
-        print("Episode: ", episode)
+        if (episode % 500) == 0:
+            print("Episode: ", episode)
 
         # time-step of current episode; incremented once in each repetition in the while loop
         time_step = 0
@@ -308,7 +309,7 @@ def run_training_operation():
             back propagate mse loss with optimizer
             
         """
-        if (episode % NUM_EPISODES_TO_REMEMBER) is 0 and (episode != 0):
+        if (episode % NUM_EPISODES_TO_REMEMBER) == 0 and (episode != 0):
 
             # policy loss will have the losses computed throughout the batches appended to it, it acts as a log
             # for the MSE loss computed between Q and Y (target Q)
@@ -323,7 +324,7 @@ def run_training_operation():
                 learning_index = np.random.randint(0, pnp_idx)
 
                 # read memory data from data structure based on sampled index
-                Y_exp_rep = torch.tensor(experience_replay[learning_index][0], requires_grad=True)
+                Y_exp_rep = torch.tensor(experience_replay[learning_index][0])
                 observation_exp_rep = experience_replay[learning_index][1:5]
                 action_exp_rep = experience_replay[learning_index][5]
 
@@ -362,7 +363,7 @@ def run_training_operation():
 
 
 def run_testing_operation():
-    num_runs = 10
+    num_runs = 500
     # DQN = DQNetwork()
     # DQN.load_state_dict(torch.load(SAVE_PATH))
     average_time = 0
