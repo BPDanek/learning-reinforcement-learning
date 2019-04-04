@@ -12,7 +12,7 @@ from tensorboardX import SummaryWriter
 
 # PATHS --------------------------------------------------------------------------------------------------------------
 # global path to save DQN parameters after training:
-SAVE_PATH = "./dqn_weights/test.pth"
+SAVE_PATH = "/Users/denbanek/PycharmProjects/dqn_project_dir/learning-reinforcement-learning/dqn_weights/test.pth"
 
 # local path for JSON logger (currently not used effectively)
 JSON_LOGDIR = "./logdirectory/learning_scalars.json"
@@ -23,17 +23,17 @@ LOGDIR = "./logdirectory"
 # HYPERPARAMETERS ----------------------------------------------------------------------------------------------------
 
 # learning rate for stochastic gradient descent
-LEARNING_RATE = 0.01
+LEARNING_RATE = 0.0008
 
 # Markov chain discount factor
 # note: the discount factor isn't actually used in this problem
 DISCOUNT = 0.99
 
 # number of episodes over which agent will learn from environment
-EPISODES =5000
+EPISODES =300
 
-# maximum number of time steps within an episode before the episode is forcefully ended
-MAX_TIMESTEP = 100
+# maximum number of timesteps  within an episode before the episode is forcefully ended
+MAX_TIMESTEP = 1000000000
 
 # the size of a single log within the experience replay. The format is [Y, obs1, obs2, obs3, obs4, action], which
 # represents recording the target Q (Y), state (obs1-obs4), action (action)
@@ -43,16 +43,16 @@ EXPERIENCE_REPLAY_SIZE = 6
 # since the Q learning step is asynchronous in this version (4.4), we need to make an experience replay,
 # a structure which holds recent transitions to learn from. This variable distinguishes the size of the
 # experience replay.
-NUM_EPISODES_TO_REMEMBER = 6
+NUM_EPISODES_TO_REMEMBER = 1
 
 # learning happens asynchronously by extracting n nonconsecutive samples from the experience replay
-BATCH_SIZE = 100
+BATCH_SIZE = 50
 
 # every 5 pisodes we go through learning process
 LEARNING_INTERVAL = 1
 
 # tensorboardX uses this object to write data to a tensorboard
-# writer = SummaryWriter(LOGDIR)
+writer = SummaryWriter(LOGDIR)
 
 # NEURAL NETWORK 9---------------------------------------------------------------------------------------------
 
@@ -69,12 +69,11 @@ Input: S.append(A) = (4,) + (1,) = (5,); np.zeros((5,)) = [0,0,0,0,0]
 
 Output: floating point value denoting value of current state-action pair
 """
-
-
 class DQNetwork(nn.Module):
 
     def __init__(self):
-        super(DQNetwork, self).__init__()  # inherits properties from parent class
+
+        super(DQNetwork, self).__init__() # inherits properties from parent class
 
         # nn layers:
         # since there is no image data, only information based on the cart
@@ -83,10 +82,10 @@ class DQNetwork(nn.Module):
         #
         # https://pytorch.org/docs/stable/nn.html#linear
 
-        self.fully_connected1 = nn.Linear(in_features=4, out_features=32)
-        self.fully_connected2 = nn.Linear(in_features=32, out_features=2)
+        self.fully_connected1 = nn.Linear(in_features=4, out_features=16)
+        # self.fully_connected2 = nn.Linear(in_features=64, out_features=128)
         # self.fully_connected3 = nn.Linear(in_features=128, out_features=64)
-        # self.fully_connected4 = nn.Linear(in_features=64, out_features=2)
+        self.fully_connected4 = nn.Linear(in_features=16, out_features=2)
         # self.fully_connected3 = nn.Linear(in_features=3, out_features=2)
         # self.fully_connected4 = nn.Linear(in_features=2, out_features=1)
 
@@ -96,9 +95,7 @@ class DQNetwork(nn.Module):
         out = F.relu(self.fully_connected1(input_data))
         # out = F.relu(self.fully_connected2(out))
         # out = F.relu(self.fully_connected3(out))
-        out = self.fully_connected2(out)
-        # out = (self.fully_connected3(out))
-        # out = self.fully_connected4(out)
+        out = self.fully_connected4(out)
 
         # to provide visibility into the network weight convergence
         # writer.add_histogram("fwd pass weights", out)
@@ -112,31 +109,24 @@ class DQNetwork(nn.Module):
 The following function performs a forward pass in the DQN (neural network) object.
 It requires that we: pass in the state, and return the confidence values for the action space.
 """
-
-
 def exploit_action(observation, env, DQN):
+
     # todo: test if this does anything; do we need to have a "requiregrad = false" in the tensor?
     # set network to evaluation mode
     DQN.eval()
 
-    left = [0]
-    right = [1]
+    temp = torch.as_tensor(observation, dtype=torch.float)
 
-    left = torch.as_tensor(np.append(observation, left), dtype=torch.float)
-    right = torch.as_tensor(np.append(observation, right), dtype=torch.float)
-
-    Q_left = DQN(left)
-    Q_right = DQN(right)
+    Q_values = DQN(temp)
 
     # compare Q_value and select the highest value one
     # sample if they're the same
-    if Q_left > Q_right:
-        return 0 # left action
-    elif Q_left < Q_right:
-        return 1 # right
+    if Q_values[0] > Q_values[1]:
+        return 0
+    elif Q_values[0] < Q_values[1]:
+        return 1
     else:
         return env.action_space.sample()
-
 
 """
 This method returns the numeric Q value of the state, action pair.
@@ -147,13 +137,16 @@ def Q_numeric_val(observation, action, DQN):
 
     # zero gradient buffers, avoid autograd differentiation due to current input. We don't want to overwrite buffers
     # since we need their information (gradients) still
+    DQN.train()
 
-    Q_numeric = torch.FloatTensor(np.append(observation,  action))
+    temp = torch.as_tensor(observation, dtype=torch.float)
+    action = DQN(temp)
 
-    DQN.eval()
-    Q_numeric = DQN(Q_numeric)
-
-    return Q_numeric
+    # return axis that denotes desired Q value
+    if action[0] > action[1]:
+        return action[0]
+    else:
+        return action[1]
 
 """
 Write data from interacting with environment to the data structure that stores the transition from s to s', and it's
@@ -164,8 +157,6 @@ during the learning step (this allocated space is the experience replay).
 
 This method inserts the memory into the index, and increments the index to show the position of the most recent memory.
 """
-
-
 def push_and_pop(Y, obs, act, exp_replay, index):
     # make shape of memory
     memory = np.zeros(EXPERIENCE_REPLAY_SIZE)
@@ -194,14 +185,14 @@ def push_and_pop(Y, obs, act, exp_replay, index):
 # global variables:
 env = gym.make('CartPole-v0')
 DQN = DQNetwork()
-# DQN.load_state_dict(torch.load(SAVE_PATH))
+#DQN.load_state_dict(torch.load(SAVE_PATH))
 
 """
 The core deep Q learning algorithm implementation with experience replay (utilizes helper functions)
 """
 
-
 def run_training_operation():
+
     # declare optimizer: stochastic gradient descent with learning rate from global hyperparameter
     optimizer = optim.SGD(DQN.parameters(), lr=LEARNING_RATE)
 
@@ -228,8 +219,8 @@ def run_training_operation():
 
         # the algorithm needs to be "zero'd" before each episode so that results from previous episodes don't interfere
         # with results of current episodes
-        if (episode % 100) == 0:
-            print("Episode: ", episode)
+        #if (episode % 1) == 0:
+        print("Episode: ", episode)
 
         # time-step of current episode; incremented once in each repetition in the while loop
         time_step = 0
@@ -318,56 +309,66 @@ def run_training_operation():
                 append mse loss to object
             sum mse losses
             back propagate mse loss with optimizer
-
+            
         """
-        if ((episode % NUM_EPISODES_TO_REMEMBER) == 0 and (episode != 0)) and (pnp_idx >= BATCH_SIZE):
+        if (episode % NUM_EPISODES_TO_REMEMBER) == 0 and (episode != 0):
 
             # policy loss will have the losses computed throughout the batches appended to it, it acts as a log
             # for the MSE loss computed between Q and Y (target Q)
+            policy_loss = []
 
             # todo: check the number of times we sample?
             # the learning step happens several times, in this version the number of samples is dictated by the number
             # of recent memories available from the last bit of learning
 
-            # extract nonzero/recently written entries to experience replay
+            # shuffle experience replay
             temp_replay = experience_replay[0:pnp_idx]
-
-            # shuffle entries
             np.random.shuffle(temp_replay)
+            # pick first [batch_size] memories as the selected memories to learn from
 
-            # select a number (dictated by BATCH_SIZE) of the entries to use for learning
             selected_experience_replay = temp_replay[0:BATCH_SIZE]
-
-            # extract columns from selected experience replay batch that correspond to info classes
-            Y_vector = torch.as_tensor(selected_experience_replay[:, 0])
-
-            # used to compute Q_vector
+            Y_vector = selected_experience_replay[:, 0]
             obs_vector = selected_experience_replay[:, 1:5]
             act_vector = selected_experience_replay[:, 5]
 
-            # toggle to train, not sure if necessary
             DQN.train()
 
-            # preallocate data
-            Q_vector = torch.as_tensor(np.zeros(BATCH_SIZE))
+            for obs_index in obs_vector:
+                Q = Q_numeric_val(obs_vector[obs_index])
 
-            # calculate Q_numeric so that we have a Q_vector
-            for index in range(BATCH_SIZE):
-                Q = Q_numeric_val(obs_vector[index], act_vector[index], DQN)
-                Q_vector[index] = Q
-
-            # loss between Y_vector and Q_vector
+            Q_vector = DQN(obs_vector)
             loss = loss_fn(Y_vector, Q_vector)
 
+            # for batch_num in range(pnp_idx):
+            #
+            #     # sample random episode within
+            #     learning_index = np.random.randint(0, pnp_idx)
+            #
+            #     # read memory data from data structure based on sampled index
+            #     Y_exp_rep = torch.tensor(experience_replay[learning_index][0])
+            #     observation_exp_rep = experience_replay[learning_index][1:5]
+            #     action_exp_rep = experience_replay[learning_index][5]
+            #
+            #     # compute Q value estimate from neural network
+            #     Q_exp_rep = Q_numeric_val(observation_exp_rep, action_exp_rep, DQN)
+            #
+            #     # compute loss between target Q (Y) and estimated Q (Q)
+            #     # mem_loss is the loss within a single memory, or transition
+            #     mem_loss = loss_fn(Y_exp_rep, Q_exp_rep)
+            #
+            #     # policy loss holds mem_losses from the memory loss computation step
+            #     policy_loss.append(mem_loss)
+
             # back propagate with cumulative mse loss:
+
             # freeze gradients
             optimizer.zero_grad()
 
             # sum of loss over batch of memories
-            #sum_loss = torch.sum(policy_loss)
+            sum_loss = torch.sum(policy_loss)
 
             # pytorch backward pass over sum of losses
-            loss.backward()
+            sum_loss.backward()
 
             # zero pnp_index, this operation represents the notion of clearing experience memory
             # allows us to write from the start of the queue again at the interaction with env stage

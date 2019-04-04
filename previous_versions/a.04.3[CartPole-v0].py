@@ -12,7 +12,7 @@ import torch
 from tensorboardX import SummaryWriter
 
 
-SAVE_PATH = "/Users/denbanek/PycharmProjects/dqn_project_dir/learning-reinforcement-learning/dqn_weights/100.pth"
+SAVE_PATH = "/Users/denbanek/PycharmProjects/dqn_project_dir/learning-reinforcement-learning/dqn_weights/bigrun.pth"
 JSON_LOGDIR = "./logdirectory/learning_scalars.json"
 LOGDIR = "./logdirectory"
 
